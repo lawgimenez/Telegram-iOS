@@ -25,7 +25,7 @@ public func stickerFromLegacyDocument(_ documentAttachment: TGDocumentMediaAttac
                 fileReference = data
             }
             
-            return TelegramMediaFile(fileId: MediaId(namespace: Namespaces.Media.CloudFile, id: documentAttachment.documentId), partialReference: nil, resource: CloudDocumentMediaResource(datacenterId: Int(documentAttachment.datacenterId), fileId: documentAttachment.documentId, accessHash: documentAttachment.accessHash, size: Int(documentAttachment.size), fileReference: fileReference, fileName: documentAttachment.fileName()), previewRepresentations: [], immediateThumbnailData: nil, mimeType: documentAttachment.mimeType, size: Int(documentAttachment.size), attributes: attributes)
+            return TelegramMediaFile(fileId: MediaId(namespace: Namespaces.Media.CloudFile, id: documentAttachment.documentId), partialReference: nil, resource: CloudDocumentMediaResource(datacenterId: Int(documentAttachment.datacenterId), fileId: documentAttachment.documentId, accessHash: documentAttachment.accessHash, size: Int(documentAttachment.size), fileReference: fileReference, fileName: documentAttachment.fileName()), previewRepresentations: [], videoThumbnails: [], immediateThumbnailData: nil, mimeType: documentAttachment.mimeType, size: Int(documentAttachment.size), attributes: attributes)
         }
     }
     return nil
@@ -198,11 +198,11 @@ final class LegacyStickerImageDataSource: TGImageDataSource {
             var previewRepresentations: [TelegramMediaImageRepresentation] = []
             if let legacyThumbnailUri = args["legacyThumbnailUri"] as? String, let data = Data(base64Encoded: legacyThumbnailUri, options: []) {
                 if let resource = PostboxDecoder(buffer: MemoryBuffer(data: data)).decodeRootObject() as? TelegramMediaResource {
-                    previewRepresentations.append(TelegramMediaImageRepresentation(dimensions: PixelDimensions(width: 140, height: 140), resource: resource))
+                    previewRepresentations.append(TelegramMediaImageRepresentation(dimensions: PixelDimensions(width: 140, height: 140), resource: resource, progressiveSizes: []))
                 }
             }
             
-            return LegacyStickerImageDataTask(account: account, file: TelegramMediaFile(fileId: MediaId(namespace: Namespaces.Media.CloudFile, id: documentId), partialReference: nil, resource: CloudDocumentMediaResource(datacenterId: datacenterId, fileId: documentId, accessHash: accessHash, size: size, fileReference: nil, fileName: fileNameFromFileAttributes(attributes)), previewRepresentations: previewRepresentations, immediateThumbnailData: nil, mimeType: "image/webp", size: size, attributes: attributes), small: !highQuality, fitSize: fitSize, completion: { image in
+            return LegacyStickerImageDataTask(account: account, file: TelegramMediaFile(fileId: MediaId(namespace: Namespaces.Media.CloudFile, id: documentId), partialReference: nil, resource: CloudDocumentMediaResource(datacenterId: datacenterId, fileId: documentId, accessHash: accessHash, size: size, fileReference: nil, fileName: fileNameFromFileAttributes(attributes)), previewRepresentations: previewRepresentations, videoThumbnails: [], immediateThumbnailData: nil, mimeType: "image/webp", size: size, attributes: attributes), small: !highQuality, fitSize: fitSize, completion: { image in
                 if let image = image {
                     sharedImageCache.setImage(image, forKey: uri, attributes: nil)
                     completion?(TGDataResource(image: image, decoded: true))

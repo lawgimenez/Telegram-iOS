@@ -8,7 +8,7 @@ import SyncCore
 import UniversalMediaPlayer
 
 protocol WebEmbedImplementation {
-    func setup(_ webView: WKWebView, userContentController: WKUserContentController, evaluateJavaScript: @escaping (String) -> Void, updateStatus: @escaping (MediaPlayerStatus) -> Void, onPlaybackStarted: @escaping () -> Void)
+    func setup(_ webView: WKWebView, userContentController: WKUserContentController, evaluateJavaScript: @escaping (String, ((Any?) -> Void)?) -> Void, updateStatus: @escaping (MediaPlayerStatus) -> Void, onPlaybackStarted: @escaping () -> Void)
     
     func play()
     func pause()
@@ -40,7 +40,7 @@ public func webEmbedType(content: TelegramMediaWebpageLoadedContent, forcedTimes
         return .youtube(videoId: videoId, timestamp: forcedTimestamp ?? timestamp)
     } else if let (videoId, timestamp) = extractVimeoVideoIdAndTimestamp(url: content.url) {
         return .vimeo(videoId: videoId, timestamp: forcedTimestamp ?? timestamp)
-    } else if let embedUrl = content.embedUrl, isTwitchVideoUrl(embedUrl) {
+    } else if let embedUrl = content.embedUrl, isTwitchVideoUrl(embedUrl) && false {
         return .twitch(url: embedUrl)
     } else {
         return .iframe(url: content.embedUrl ?? content.url)
@@ -73,7 +73,7 @@ final class WebEmbedPlayerNode: ASDisplayNode, WKNavigationDelegate {
         return self.readyValue.get()
     }
     
-    private let impl: WebEmbedImplementation
+    let impl: WebEmbedImplementation
     
     private let intrinsicDimensions: CGSize
     private let webView: WKWebView
@@ -88,24 +88,24 @@ final class WebEmbedPlayerNode: ASDisplayNode, WKNavigationDelegate {
         let userContentController = WKUserContentController()
         userContentController.addUserScript(WKUserScript(source: "var meta = document.createElement('meta'); meta.setAttribute('name', 'viewport'); meta.setAttribute('content', 'width=device-width'); document.getElementsByTagName('head')[0].appendChild(meta)", injectionTime: .atDocumentEnd, forMainFrameOnly: true))
         
-        let config = WKWebViewConfiguration()
-        config.allowsInlineMediaPlayback = true
-        config.userContentController = userContentController
+        let configuration = WKWebViewConfiguration()
+        configuration.allowsInlineMediaPlayback = true
+        configuration.userContentController = userContentController
         
         if #available(iOSApplicationExtension 10.0, iOS 10.0, *) {
-            config.mediaTypesRequiringUserActionForPlayback = []
+            configuration.mediaTypesRequiringUserActionForPlayback = []
         } else if #available(iOSApplicationExtension 9.0, iOS 9.0, *) {
-            config.requiresUserActionForMediaPlayback = false
+            configuration.requiresUserActionForMediaPlayback = false
         } else {
-            config.mediaPlaybackRequiresUserAction = false
+            configuration.mediaPlaybackRequiresUserAction = false
         }
         
         if #available(iOSApplicationExtension 9.0, iOS 9.0, *) {
-            config.allowsPictureInPictureMediaPlayback = false
+            configuration.allowsPictureInPictureMediaPlayback = false
         }
 
         let frame = CGRect(origin: CGPoint.zero, size: intrinsicDimensions)
-        self.webView = WKWebView(frame: frame, configuration: config)
+        self.webView = WKWebView(frame: frame, configuration: configuration)
         
         super.init()
         self.frame = frame
@@ -118,13 +118,28 @@ final class WebEmbedPlayerNode: ASDisplayNode, WKNavigationDelegate {
         }
         self.view.addSubview(self.webView)
         
-        self.impl.setup(self.webView, userContentController: userContentController, evaluateJavaScript: { [weak self] js in
-            self?.evaluateJavaScript(js: js)
+        self.impl.setup(self.webView, userContentController: userContentController, evaluateJavaScript: { [weak self] js, completion in
+            self?.evaluateJavaScript(js: js, completion: completion)
         }, updateStatus: { [weak self] status in
             self?.statusValue.set(status)
         }, onPlaybackStarted: { [weak self] in
             self?.readyValue.set(true)
         })
+    }
+    
+    deinit {
+        func disableGestures(view: UIView) {
+            if let recognizers = view.gestureRecognizers {
+                for recognizer in recognizers {
+                    recognizer.isEnabled = false
+                }
+            }
+            for subview in view.subviews {
+                disableGestures(view: subview)
+            }
+        }
+        
+        disableGestures(view: self.webView)
     }
     
     func play() {
@@ -168,12 +183,15 @@ final class WebEmbedPlayerNode: ASDisplayNode, WKNavigationDelegate {
         }
     }
     
-    private func evaluateJavaScript(js: String) {
+    private func evaluateJavaScript(js: String, completion: ((Any?) -> Void)?) {
         self.queue.async { [weak self] in
             if let strongSelf = self {
                 let impl = {
-                    strongSelf.webView.evaluateJavaScript(js, completionHandler: { (_, _) in
+                    strongSelf.webView.evaluateJavaScript(js, completionHandler: { (result, _) in
                         strongSelf.semaphore.signal()
+                        if let completion = completion {
+                            completion(result)
+                        }
                     })
                 }
                 

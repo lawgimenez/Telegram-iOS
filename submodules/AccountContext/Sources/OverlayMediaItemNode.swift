@@ -21,6 +21,9 @@ open class OverlayMediaItemNode: ASDisplayNode {
     
     open var unminimize: (() -> Void)?
     
+    public var manualExpandEmbed: (() -> Void)?
+    public var customUnembedWhenPortrait: ((OverlayMediaItemNode) -> Bool)?
+    
     open var group: OverlayMediaItemNodeGroup? {
         return nil
     }
@@ -38,7 +41,7 @@ open class OverlayMediaItemNode: ASDisplayNode {
     open func setShouldAcquireContext(_ value: Bool) {
     }
     
-    open func preferredSizeForOverlayDisplay() -> CGSize {
+    open func preferredSizeForOverlayDisplay(boundingSize: CGSize) -> CGSize {
         return CGSize(width: 50.0, height: 50.0)
     }
     

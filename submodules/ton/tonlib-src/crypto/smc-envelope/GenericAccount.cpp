@@ -14,13 +14,38 @@
     You should have received a copy of the GNU Lesser General Public License
     along with TON Blockchain Library.  If not, see <http://www.gnu.org/licenses/>.
 
-    Copyright 2017-2019 Telegram Systems LLP
+    Copyright 2017-2020 Telegram Systems LLP
 */
 #include "GenericAccount.h"
 
 #include "block/block-auto.h"
 #include "block/block-parse.h"
 namespace ton {
+
+namespace smc {
+td::Ref<vm::CellSlice> pack_grams(td::uint64 amount) {
+  vm::CellBuilder cb;
+  block::tlb::t_Grams.store_integer_value(cb, td::BigInt256(amount));
+  return vm::load_cell_slice_ref(cb.finalize());
+}
+
+bool unpack_grams(td::Ref<vm::CellSlice> cs, td::uint64& amount) {
+  td::RefInt256 got;
+  if (!block::tlb::t_Grams.as_integer_to(cs, got)) {
+    return false;
+  }
+  if (!got->unsigned_fits_bits(63)) {
+    return false;
+  }
+  auto x = got->to_long();
+  if (x < 0) {
+    return false;
+  }
+  amount = x;
+  return true;
+}
+}  // namespace smc
+
 td::Ref<vm::Cell> GenericAccount::get_init_state(td::Ref<vm::Cell> code, td::Ref<vm::Cell> data) noexcept {
   return vm::CellBuilder()
       .store_zeroes(2)
@@ -47,7 +72,7 @@ void GenericAccount::store_int_message(vm::CellBuilder& cb, const block::StdAddr
       .store_long(dest_address.workchain, 8)
       .store_int256(dest_addr, 256);
   block::tlb::t_Grams.store_integer_value(cb, td::BigInt256(gramms));
-  cb.store_zeroes(9 + 64 + 32 + 1 + 1);
+  cb.store_zeroes(9 + 64 + 32);
 }
 
 td::Ref<vm::Cell> GenericAccount::create_ext_message(const block::StdAddress& address, td::Ref<vm::Cell> new_state,
@@ -95,5 +120,20 @@ td::Ref<vm::Cell> GenericAccount::create_ext_message(const block::StdAddress& ad
   CHECK(res.not_null());
 
   return res;
+}
+td::Result<td::Ed25519::PublicKey> GenericAccount::get_public_key(const SmartContract& sc) {
+  auto answer = sc.run_get_method("get_public_key");
+  if (!answer.success) {
+    return td::Status::Error("get_public_key failed");
+  }
+  auto do_get_public_key = [&]() -> td::Result<td::Ed25519::PublicKey> {
+    auto key = answer.stack.write().pop_int_finite();
+    td::SecureString bytes(32);
+    if (!key->export_bytes(bytes.as_mutable_slice().ubegin(), bytes.size(), false)) {
+      return td::Status::Error("get_public_key failed");
+    }
+    return td::Ed25519::PublicKey(std::move(bytes));
+  };
+  return TRY_VM(do_get_public_key());
 }
 }  // namespace ton

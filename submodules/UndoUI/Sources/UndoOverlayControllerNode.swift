@@ -26,6 +26,7 @@ final class UndoOverlayControllerNode: ViewControllerTracingNode {
     private var animatedStickerNode: AnimatedStickerNode?
     private var stillStickerNode: TransformImageNode?
     private var stickerImageSize: CGSize?
+    private var stickerOffset: CGPoint?
     private let titleNode: ImmediateTextNode
     private let textNode: ImmediateTextNode
     private let buttonNode: HighlightTrackingButtonNode
@@ -137,6 +138,19 @@ final class UndoOverlayControllerNode: ViewControllerTracingNode {
                 self.textNode.maximumNumberOfLines = 2
                 displayUndo = false
                 self.originalRemainingSeconds = 5
+            case let .info(text):
+                self.iconNode = nil
+                self.iconCheckNode = nil
+                self.animationNode = AnimationNode(animation: "anim_infotip", colors: ["info1.info1.stroke": self.animationBackgroundColor, "info2.info2.Fill": self.animationBackgroundColor], scale: 1.0)
+                self.animatedStickerNode = nil
+            
+                let body = MarkdownAttributeSet(font: Font.regular(14.0), textColor: .white)
+                let bold = MarkdownAttributeSet(font: Font.semibold(14.0), textColor: .white)
+                let attributedText = parseMarkdownIntoAttributedString(text, attributes: MarkdownAttributes(body: body, bold: bold, link: body, linkAttribute: { _ in return nil }), textAlignment: .natural)
+                self.textNode.attributedText = attributedText
+                self.textNode.maximumNumberOfLines = 2
+                displayUndo = false
+                self.originalRemainingSeconds = max(5, min(8, text.count / 14))
             case let .actionSucceeded(title, text, cancel):
                 self.iconNode = nil
                 self.iconCheckNode = nil
@@ -154,13 +168,45 @@ final class UndoOverlayControllerNode: ViewControllerTracingNode {
                 displayUndo = true
                 undoText = cancel
                 self.originalRemainingSeconds = 5
+            case let .chatAddedToFolder(chatTitle, folderTitle):
+                self.iconNode = nil
+                self.iconCheckNode = nil
+                self.animationNode = AnimationNode(animation: "anim_success", colors: ["info1.info1.stroke": self.animationBackgroundColor, "info2.info2.Fill": self.animationBackgroundColor], scale: 1.0)
+                self.animatedStickerNode = nil
+                
+                let (rawString, attributes) = presentationData.strings.ChatList_AddedToFolderTooltip(chatTitle, folderTitle)
+                
+                let string = NSMutableAttributedString(attributedString: NSAttributedString(string: rawString, font: Font.regular(14.0), textColor: .white))
+                for (_, range) in attributes {
+                    string.addAttribute(.font, value: Font.regular(14.0), range: range)
+                }
+                
+                self.textNode.attributedText = string
+                displayUndo = false
+                self.originalRemainingSeconds = 5
+            case let .chatRemovedFromFolder(chatTitle, folderTitle):
+                self.iconNode = nil
+                self.iconCheckNode = nil
+                self.animationNode = AnimationNode(animation: "anim_success", colors: ["info1.info1.stroke": self.animationBackgroundColor, "info2.info2.Fill": self.animationBackgroundColor], scale: 1.0)
+                self.animatedStickerNode = nil
+                
+                let (rawString, attributes) = presentationData.strings.ChatList_RemovedFromFolderTooltip(chatTitle, folderTitle)
+                
+                let string = NSMutableAttributedString(attributedString: NSAttributedString(string: rawString, font: Font.regular(14.0), textColor: .white))
+                for (_, range) in attributes {
+                    string.addAttribute(.font, value: Font.regular(14.0), range: range)
+                }
+                
+                self.textNode.attributedText = string
+                displayUndo = false
+                self.originalRemainingSeconds = 5
             case let .emoji(path, text):
                 self.iconNode = nil
                 self.iconCheckNode = nil
                 self.animationNode = nil
                 self.animatedStickerNode = AnimatedStickerNode()
                 self.animatedStickerNode?.visibility = true
-                self.animatedStickerNode?.setup(source: AnimatedStickerNodeLocalFileSource(path: path), width: 100, height: 100, playbackMode: .once, mode: .direct)
+                self.animatedStickerNode?.setup(source: AnimatedStickerNodeLocalFileSource(path: path), width: 100, height: 100, playbackMode: .once, mode: .direct(cachePathPrefix: nil))
                 
                 let body = MarkdownAttributeSet(font: Font.regular(14.0), textColor: .white)
                 let bold = MarkdownAttributeSet(font: Font.semibold(14.0), textColor: .white)
@@ -209,7 +255,7 @@ final class UndoOverlayControllerNode: ViewControllerTracingNode {
                         thumbnailItem = .animated(item.file.resource)
                         resourceReference = MediaResourceReference.media(media: .standalone(media: item.file), resource: item.file.resource)
                     } else if let dimensions = item.file.dimensions, let resource = chatMessageStickerResource(file: item.file, small: true) as? TelegramMediaResource {
-                        thumbnailItem = .still(TelegramMediaImageRepresentation(dimensions: dimensions, resource: resource))
+                        thumbnailItem = .still(TelegramMediaImageRepresentation(dimensions: dimensions, resource: resource, progressiveSizes: []))
                         resourceReference = MediaResourceReference.media(media: .standalone(media: item.file), resource: resource)
                     }
                 }
@@ -266,6 +312,50 @@ final class UndoOverlayControllerNode: ViewControllerTracingNode {
                         animatedStickerNode.setup(source: AnimatedStickerResourceSource(account: account, resource: resource), width: 80, height: 80, mode: .cached)
                     }
                 }
+            case let .dice(dice, account, text, action):
+                self.iconNode = nil
+                self.iconCheckNode = nil
+                self.animationNode = nil
+                                
+                let body = MarkdownAttributeSet(font: Font.regular(14.0), textColor: .white)
+                let bold = MarkdownAttributeSet(font: Font.semibold(14.0), textColor: .white)
+                let link = MarkdownAttributeSet(font: Font.regular(14.0), textColor: undoTextColor)
+                let attributedText = parseMarkdownIntoAttributedString(text, attributes: MarkdownAttributes(body: body, bold: bold, link: link, linkAttribute: { _ in return nil }), textAlignment: .natural)
+                self.textNode.attributedText = attributedText
+                if let action = action {
+                    displayUndo = true
+                    undoText = action
+                } else {
+                    displayUndo = false
+                }
+                self.originalRemainingSeconds = 5
+                
+                self.stickerImageSize = CGSize(width: 42.0, height: 42.0)
+                
+                switch dice.emoji {
+                    case "🎲":
+                        self.stickerOffset = CGPoint(x: 0.0, y: -7.0)
+                    default:
+                        break
+                }
+                
+                let animatedStickerNode = AnimatedStickerNode()
+                self.animatedStickerNode = animatedStickerNode
+                
+                let _ = (loadedStickerPack(postbox: account.postbox, network: account.network, reference: .dice(dice.emoji), forceActualized: false)
+                |> deliverOnMainQueue).start(next: { stickerPack in
+                    if let value = dice.value {
+                        switch stickerPack {
+                            case let .result(_, items, _):
+                                let item = items[Int(value)]
+                                if let item = item as? StickerPackItem {
+                                    animatedStickerNode.setup(source: AnimatedStickerResourceSource(account: account, resource: item.file.resource), width: 120, height: 120, playbackMode: .once, mode: .direct(cachePathPrefix: nil))
+                                }
+                            default:
+                                break
+                        }
+                    }
+                })
         }
         
         self.remainingSeconds = self.originalRemainingSeconds
@@ -294,8 +384,12 @@ final class UndoOverlayControllerNode: ViewControllerTracingNode {
         switch content {
         case .removedChat:
             self.panelWrapperNode.addSubnode(self.timerTextNode)
-        case .archivedChat, .hidArchive, .revealedArchive, .succeed, .emoji, .swipeToReply, .actionSucceeded, .stickersModified:
+        case .archivedChat, .hidArchive, .revealedArchive, .succeed, .emoji, .swipeToReply, .actionSucceeded, .stickersModified, .chatAddedToFolder, .chatRemovedFromFolder:
             break
+        case .dice:
+            self.panelWrapperNode.clipsToBounds = true
+        case .info:
+            self.isUserInteractionEnabled = false
         }
         self.statusNode.flatMap(self.panelWrapperNode.addSubnode)
         self.iconNode.flatMap(self.panelWrapperNode.addSubnode)
@@ -350,7 +444,7 @@ final class UndoOverlayControllerNode: ViewControllerTracingNode {
     }
     
     @objc private func undoButtonPressed() {
-        self.action(.undo)
+        let _ = self.action(.undo)
         self.dismiss()
     }
     
@@ -359,7 +453,7 @@ final class UndoOverlayControllerNode: ViewControllerTracingNode {
             self.remainingSeconds -= 1
         }
         if self.remainingSeconds == 0 {
-            self.action(.commit)
+            let _ = self.action(.commit)
             self.dismiss()
         } else {
             if !self.timerTextNode.bounds.size.width.isZero, let snapshot = self.timerTextNode.view.snapshotContentTree() {
@@ -404,7 +498,7 @@ final class UndoOverlayControllerNode: ViewControllerTracingNode {
         let rightInset: CGFloat = 16.0
         var contentHeight: CGFloat = 20.0
         
-        let margin: CGFloat = 16.0
+        let margin: CGFloat = 12.0
         
         let buttonTextSize = self.undoButtonTextNode.updateLayout(CGSize(width: 200.0, height: .greatestFiniteMagnitude))
         let buttonMinX: CGFloat
@@ -477,7 +571,11 @@ final class UndoOverlayControllerNode: ViewControllerTracingNode {
         
         if let stickerImageSize = self.stickerImageSize {
             let iconSize = stickerImageSize
-            let iconFrame = CGRect(origin: CGPoint(x: floor((leftInset - iconSize.width) / 2.0), y: floor((contentHeight - iconSize.height) / 2.0)), size: iconSize)
+            var iconFrame = CGRect(origin: CGPoint(x: floor((leftInset - iconSize.width) / 2.0), y: floor((contentHeight - iconSize.height) / 2.0)), size: iconSize)
+            
+            if let stickerOffset = self.stickerOffset {
+                iconFrame = iconFrame.offsetBy(dx: stickerOffset.x, dy: stickerOffset.y)
+            }
             
             if let stillStickerNode = self.stillStickerNode {
                 let makeImageLayout = stillStickerNode.asyncLayout()

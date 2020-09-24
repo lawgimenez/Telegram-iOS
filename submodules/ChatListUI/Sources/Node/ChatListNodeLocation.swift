@@ -29,79 +29,89 @@ struct ChatListNodeViewUpdate {
     let scrollPosition: ChatListNodeViewScrollPosition?
 }
 
-func chatListViewForLocation(groupId: PeerGroupId, location: ChatListNodeLocation, account: Account) -> Signal<ChatListNodeViewUpdate, NoError> {
-    let filterPredicate: ((Peer, PeerNotificationSettings?, Bool) -> Bool)?
-    if let filter = location.filter {
-        let includePeers = Set(filter.includePeers)
-        filterPredicate = { peer, notificationSettings, isUnread in
-            if includePeers.contains(peer.id) {
-                return true
+func chatListFilterPredicate(filter: ChatListFilterData) -> ChatListFilterPredicate {
+    var includePeers = Set(filter.includePeers.peers)
+    var excludePeers = Set(filter.excludePeers)
+    
+    if !filter.includePeers.pinnedPeers.isEmpty {
+        includePeers.subtract(filter.includePeers.pinnedPeers)
+        excludePeers.subtract(filter.includePeers.pinnedPeers)
+    }
+    
+    var includeAdditionalPeerGroupIds: [PeerGroupId] = []
+    if !filter.excludeArchived {
+        includeAdditionalPeerGroupIds.append(Namespaces.PeerGroup.archive)
+    }
+    
+    var messageTagSummary: ChatListMessageTagSummaryResultCalculation?
+    if filter.excludeRead || filter.excludeMuted {
+        messageTagSummary = ChatListMessageTagSummaryResultCalculation(addCount: ChatListMessageTagSummaryResultComponent(tag: .unseenPersonalMessage, namespace: Namespaces.Message.Cloud), subtractCount: ChatListMessageTagActionsSummaryResultComponent(type: PendingMessageActionType.consumeUnseenPersonalMessage, namespace: Namespaces.Message.Cloud))
+    }
+    return ChatListFilterPredicate(includePeerIds: includePeers, excludePeerIds: excludePeers, pinnedPeerIds: filter.includePeers.pinnedPeers, messageTagSummary: messageTagSummary, includeAdditionalPeerGroupIds: includeAdditionalPeerGroupIds, include: { peer, isMuted, isUnread, isContact, messageTagSummaryResult in
+        if filter.excludeRead {
+            var effectiveUnread = isUnread
+            if let messageTagSummaryResult = messageTagSummaryResult, messageTagSummaryResult {
+                effectiveUnread = true
             }
-            if filter.excludeRead {
-                if !isUnread {
-                    return false
-                }
+            if !effectiveUnread {
+                return false
             }
-            if filter.excludeMuted {
-                if let notificationSettings = notificationSettings as? TelegramPeerNotificationSettings {
-                    if case .muted = notificationSettings.muteState {
-                        return false
-                    }
+        }
+        if filter.excludeMuted {
+            if isMuted {
+                if let messageTagSummaryResult = messageTagSummaryResult, messageTagSummaryResult {
                 } else {
                     return false
                 }
             }
-            if !filter.categories.contains(.privateChats) {
-                if let user = peer as? TelegramUser {
-                    if user.botInfo == nil {
-                        return false
-                    }
-                }
-            }
-            if !filter.categories.contains(.secretChats) {
-                if let _ = peer as? TelegramSecretChat {
-                    return false
-                }
-            }
-            if !filter.categories.contains(.bots) {
-                if let user = peer as? TelegramUser {
-                    if user.botInfo != nil {
-                        return false
-                    }
-                }
-            }
-            if !filter.categories.contains(.privateGroups) {
-                if let _ = peer as? TelegramGroup {
-                    return false
-                } else if let channel = peer as? TelegramChannel {
-                    if case .group = channel.info {
-                        if channel.username == nil {
-                            return false
-                        }
-                    }
-                }
-            }
-            if !filter.categories.contains(.publicGroups) {
-                if let channel = peer as? TelegramChannel {
-                    if case .group = channel.info {
-                        if channel.username != nil {
-                            return false
-                        }
-                    }
-                }
-            }
-            if !filter.categories.contains(.channels) {
-                if let channel = peer as? TelegramChannel {
-                    if case .broadcast = channel.info {
-                        return false
-                    }
-                }
-            }
-            return true
         }
-    } else {
-        filterPredicate = nil
-    }
+        if !filter.categories.contains(.contacts) && isContact {
+            if let user = peer as? TelegramUser {
+                if user.botInfo == nil {
+                    return false
+                }
+            } else if let _ = peer as? TelegramSecretChat {
+                return false
+            }
+        }
+        if !filter.categories.contains(.nonContacts) && !isContact {
+            if let user = peer as? TelegramUser {
+                if user.botInfo == nil {
+                    return false
+                }
+            } else if let _ = peer as? TelegramSecretChat {
+                return false
+            }
+        }
+        if !filter.categories.contains(.bots) {
+            if let user = peer as? TelegramUser {
+                if user.botInfo != nil {
+                    return false
+                }
+            }
+        }
+        if !filter.categories.contains(.groups) {
+            if let _ = peer as? TelegramGroup {
+                return false
+            } else if let channel = peer as? TelegramChannel {
+                if case .group = channel.info {
+                    return false
+                }
+            }
+        }
+        if !filter.categories.contains(.channels) {
+            if let channel = peer as? TelegramChannel {
+                if case .broadcast = channel.info {
+                    return false
+                }
+            }
+        }
+        return true
+    })
+}
+
+func chatListViewForLocation(groupId: PeerGroupId, location: ChatListNodeLocation, account: Account) -> Signal<ChatListNodeViewUpdate, NoError> {
+    let filterPredicate: ChatListFilterPredicate? = (location.filter?.data).flatMap(chatListFilterPredicate)
     
     switch location {
         case let .initial(count, _):

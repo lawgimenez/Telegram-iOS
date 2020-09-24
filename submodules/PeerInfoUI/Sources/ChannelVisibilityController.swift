@@ -615,7 +615,7 @@ private func channelVisibilityControllerEntries(presentationData: PresentationDa
         }
     } else if let _ = view.peers[view.peerId] as? TelegramGroup {
         switch mode {
-            case .privateLink:
+        case .privateLink:
                 let link = (view.cachedData as? CachedGroupData)?.exportedInvitation?.link
                 let text: String
                 if let link = link {
@@ -640,7 +640,7 @@ private func channelVisibilityControllerEntries(presentationData: PresentationDa
                 if let current = state.selectedType {
                     selectedType = current
                 } else {
-                    selectedType = .publicChannel
+                    selectedType = .privateChannel
                 }
                 
                 let currentAddressName: String
@@ -1257,10 +1257,16 @@ public func channelVisibilityController(context: AccountContext, peerId: PeerId,
                 let selectionController = context.sharedContext.makeContactMultiselectionController(ContactMultiselectionControllerParams(context: context, mode: .channelCreation, options: []))
                 (controller.navigationController as? NavigationController)?.replaceAllButRootController(selectionController, animated: true)
                 let _ = (selectionController.result
-                |> deliverOnMainQueue).start(next: { [weak selectionController] peerIds in
+                |> deliverOnMainQueue).start(next: { [weak selectionController] result in
                     guard let selectionController = selectionController, let navigationController = selectionController.navigationController as? NavigationController else {
                         return
                     }
+                    
+                    var peerIds: [ContactListPeerId] = []
+                    if case let .result(peerIdsValue, _) = result {
+                        peerIds = peerIdsValue
+                    }
+                    
                     let filteredPeerIds = peerIds.compactMap({ peerId -> PeerId? in
                         if case let .peer(id) = peerId {
                             return id

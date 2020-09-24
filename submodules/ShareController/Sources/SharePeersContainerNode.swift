@@ -80,6 +80,8 @@ final class SharePeersContainerNode: ASDisplayNode, ShareContentContainerNode {
     private let nameDisplayOrder: PresentationPersonNameOrder
     private let controllerInteraction: ShareControllerInteraction
     private let switchToAnotherAccount: () -> Void
+    private let extendedInitialReveal: Bool
+    private let statsCount: Int?
     
     let accountPeer: Peer
     private let foundPeers = Promise<[RenderedPeer]>([])
@@ -95,11 +97,13 @@ final class SharePeersContainerNode: ASDisplayNode, ShareContentContainerNode {
     private let contentSeparatorNode: ASDisplayNode
     private let searchButtonNode: HighlightableButtonNode
     private let shareButtonNode: HighlightableButtonNode
+    private let statsButtonNode: HighlightableButtonNode
     
     private var contentOffsetUpdated: ((CGFloat, ContainedViewLayoutTransition) -> Void)?
     
     var openSearch: (() -> Void)?
     var openShare: (() -> Void)?
+    var openStats: (() -> Void)?
     
     private var ensurePeerVisibleOnLayout: PeerId?
     private var validLayout: (CGSize, CGFloat)?
@@ -107,7 +111,7 @@ final class SharePeersContainerNode: ASDisplayNode, ShareContentContainerNode {
     
     let peersValue = Promise<[(RenderedPeer, PeerPresence?)]>()
     
-    init(sharedContext: SharedAccountContext, context: AccountContext, switchableAccounts: [AccountWithInfo], theme: PresentationTheme, strings: PresentationStrings, nameDisplayOrder: PresentationPersonNameOrder, peers: [(RenderedPeer, PeerPresence?)], accountPeer: Peer, controllerInteraction: ShareControllerInteraction, externalShare: Bool, switchToAnotherAccount: @escaping () -> Void) {
+    init(sharedContext: SharedAccountContext, context: AccountContext, switchableAccounts: [AccountWithInfo], theme: PresentationTheme, strings: PresentationStrings, nameDisplayOrder: PresentationPersonNameOrder, peers: [(RenderedPeer, PeerPresence?)], accountPeer: Peer, controllerInteraction: ShareControllerInteraction, externalShare: Bool, switchToAnotherAccount: @escaping () -> Void, extendedInitialReveal: Bool, statsCount: Int?) {
         self.sharedContext = sharedContext
         self.context = context
         self.theme = theme
@@ -116,6 +120,8 @@ final class SharePeersContainerNode: ASDisplayNode, ShareContentContainerNode {
         self.controllerInteraction = controllerInteraction
         self.accountPeer = accountPeer
         self.switchToAnotherAccount = switchToAnotherAccount
+        self.extendedInitialReveal = extendedInitialReveal
+        self.statsCount = statsCount
         
         self.peersValue.set(.single(peers))
         
@@ -172,6 +178,13 @@ final class SharePeersContainerNode: ASDisplayNode, ShareContentContainerNode {
         self.shareButtonNode = HighlightableButtonNode()
         self.shareButtonNode.setImage(generateTintedImage(image: UIImage(bundleImageName: "Share/ShareIcon"), color: self.theme.actionSheet.controlAccentColor), for: [])
         
+        self.statsButtonNode = HighlightableButtonNode()
+        self.statsButtonNode.setAttributedTitle(NSAttributedString(string: "\(statsCount ?? 0) Shares", font: Font.regular(17.0), textColor: self.theme.actionSheet.controlAccentColor), for: .normal)
+        self.statsButtonNode.isHidden = statsCount == nil
+         
+        self.contentTitleNode.isHidden = !self.statsButtonNode.isHidden
+        self.contentSubtitleNode.isHidden = !self.statsButtonNode.isHidden
+        
         self.contentSeparatorNode = ASDisplayNode()
         self.contentSeparatorNode.isLayerBacked = true
         self.contentSeparatorNode.displaysAsynchronously = false
@@ -190,6 +203,7 @@ final class SharePeersContainerNode: ASDisplayNode, ShareContentContainerNode {
         self.addSubnode(self.contentTitleAccountNode)
         self.addSubnode(self.searchButtonNode)
         self.addSubnode(self.shareButtonNode)
+        self.addSubnode(self.statsButtonNode)
         self.addSubnode(self.contentSeparatorNode)
         
         let previousItems = Atomic<[SharePeerEntry]?>(value: [])
@@ -211,6 +225,7 @@ final class SharePeersContainerNode: ASDisplayNode, ShareContentContainerNode {
         
         self.searchButtonNode.addTarget(self, action: #selector(self.searchPressed), forControlEvents: .touchUpInside)
         self.shareButtonNode.addTarget(self, action: #selector(self.sharePressed), forControlEvents: .touchUpInside)
+        self.statsButtonNode.addTarget(self, action: #selector(self.statsPressed), forControlEvents: .touchUpInside)
         self.contentTitleAccountNode.view.addGestureRecognizer(UITapGestureRecognizer(target: self, action: #selector(self.accountTapGesture(_:))))
     }
     
@@ -261,7 +276,12 @@ final class SharePeersContainerNode: ASDisplayNode, ShareContentContainerNode {
         var rowCount = itemCount / itemsPerRow + (itemCount % itemsPerRow != 0 ? 1 : 0)
         rowCount = max(rowCount, 4)
         
-        let minimallyRevealedRowCount: CGFloat = 3.7
+        let minimallyRevealedRowCount: CGFloat
+        if self.extendedInitialReveal {
+            minimallyRevealedRowCount = 4.6
+        } else {
+            minimallyRevealedRowCount = 3.7
+        }
         let initiallyRevealedRowCount = min(minimallyRevealedRowCount, CGFloat(rowCount))
         
         let gridTopInset = max(0.0, size.height - floor(initiallyRevealedRowCount * itemWidth) - 14.0)
@@ -334,6 +354,9 @@ final class SharePeersContainerNode: ASDisplayNode, ShareContentContainerNode {
         self.contentSubtitleNode.frame = originalSubtitleFrame
         transition.updateFrame(node: self.contentSubtitleNode, frame: subtitleFrame)
         
+        let statsSize = self.statsButtonNode.measure(CGSize(width: size.width - 44.0 * 2.0 - 8.0 * 2.0, height: titleAreaHeight))
+        transition.updateFrame(node: self.statsButtonNode, frame: CGRect(origin: CGPoint(x: floor((size.width - statsSize.width) / 2.0), y: titleOffset + 22.0), size: statsSize))
+        
         let titleButtonSize = CGSize(width: 44.0, height: 44.0)
         let searchButtonFrame = CGRect(origin: CGPoint(x: 12.0, y: titleOffset + 12.0), size: titleButtonSize)
         transition.updateFrame(node: self.searchButtonNode, frame: searchButtonFrame)
@@ -369,25 +392,34 @@ final class SharePeersContainerNode: ASDisplayNode, ShareContentContainerNode {
     }
     
     func updateSelectedPeers() {
-        var subtitleText = self.strings.ShareMenu_SelectChats
-        if !self.controllerInteraction.selectedPeers.isEmpty {
-            subtitleText = self.controllerInteraction.selectedPeers.reduce("", { string, peer in
-                let text: String
-                if peer.peerId == self.accountPeer.id {
-                    text = self.strings.DialogList_SavedMessages
-                } else {
-                    text = peer.chatMainPeer?.displayTitle(strings: self.strings, displayOrder: self.nameDisplayOrder) ?? ""
-                }
-                
-                if !string.isEmpty {
-                    return string + ", " + text
-                } else {
-                    return string + text
-                }
-            })
+        if let _ = self.openStats, self.controllerInteraction.selectedPeers.isEmpty {
+            self.statsButtonNode.isHidden = false
+            self.contentTitleNode.isHidden = true
+            self.contentSubtitleNode.isHidden = true
+        } else {
+            self.statsButtonNode.isHidden = true
+            self.contentTitleNode.isHidden = false
+            self.contentSubtitleNode.isHidden = false
+            
+            var subtitleText = self.strings.ShareMenu_SelectChats
+            if !self.controllerInteraction.selectedPeers.isEmpty {
+                subtitleText = self.controllerInteraction.selectedPeers.reduce("", { string, peer in
+                    let text: String
+                    if peer.peerId == self.accountPeer.id {
+                        text = self.strings.DialogList_SavedMessages
+                    } else {
+                        text = peer.chatMainPeer?.displayTitle(strings: self.strings, displayOrder: self.nameDisplayOrder) ?? ""
+                    }
+                    
+                    if !string.isEmpty {
+                        return string + ", " + text
+                    } else {
+                        return string + text
+                    }
+                })
+            }
+            self.contentSubtitleNode.attributedText = NSAttributedString(string: subtitleText, font: subtitleFont, textColor: self.theme.actionSheet.secondaryTextColor)
         }
-        self.contentSubtitleNode.attributedText = NSAttributedString(string: subtitleText, font: subtitleFont, textColor: self.theme.actionSheet.secondaryTextColor)
-        
         self.contentGridNode.forEachItemNode { itemNode in
             if let itemNode = itemNode as? ShareControllerPeerGridItemNode {
                 itemNode.updateSelection(animated: true)
@@ -401,6 +433,10 @@ final class SharePeersContainerNode: ASDisplayNode, ShareContentContainerNode {
     
     @objc func sharePressed() {
         self.openShare?()
+    }
+    
+    @objc func statsPressed() {
+        self.openStats?()
     }
     
     override func hitTest(_ point: CGPoint, with event: UIEvent?) -> UIView? {

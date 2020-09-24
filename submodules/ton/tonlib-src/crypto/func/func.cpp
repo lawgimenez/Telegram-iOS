@@ -23,7 +23,7 @@
     exception statement from your version. If you delete this exception statement 
     from all source files in the program, then also delete it here.
 
-    Copyright 2017-2019 Telegram Systems LLP
+    Copyright 2017-2020 Telegram Systems LLP
 */
 #include "func.h"
 #include "parser/srcread.h"
@@ -129,6 +129,11 @@ int generate_output() {
     } else {
       *outs << func_val->method_id << " DECLMETHOD " << name << "\n";
     }
+  }
+  for (SymDef* gvar_sym : glob_vars) {
+    assert(dynamic_cast<SymValGlobVar*>(gvar_sym->value));
+    std::string name = sym::symbols.get_name(gvar_sym->sym_idx);
+    *outs << std::string(indent * 2, ' ') << "DECLGLOBVAR " << name << "\n";
   }
   int errors = 0;
   for (SymDef* func_sym : glob_func) {

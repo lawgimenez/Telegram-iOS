@@ -44,7 +44,7 @@ private class WalletInfoTitleView: UIView, NavigationBarTitleView {
 
 public final class WalletInfoScreen: ViewController {
     private let context: WalletContext
-    private let walletInfo: WalletInfo?
+    private let walletInfo: WalletInfo
     private let address: String
     private let enableDebugActions: Bool
     
@@ -55,7 +55,7 @@ public final class WalletInfoScreen: ViewController {
         return self._ready
     }
     
-    public init(context: WalletContext, walletInfo: WalletInfo?, address: String, enableDebugActions: Bool) {
+    public init(context: WalletContext, walletInfo: WalletInfo, address: String, enableDebugActions: Bool) {
         self.context = context
         self.walletInfo = walletInfo
         self.address = address
@@ -73,9 +73,7 @@ public final class WalletInfoScreen: ViewController {
         self.navigationBar?.intrinsicCanTransitionInline = false
         
         self.navigationItem.backBarButtonItem = UIBarButtonItem(title: self.presentationData.strings.Wallet_Navigation_Back, style: .plain, target: nil, action: nil)
-        if let _ = walletInfo {
-            self.navigationItem.rightBarButtonItem = UIBarButtonItem(image: generateTintedImage(image: UIImage(bundleImageName: "Wallet/NavigationSettingsIcon"), color: .white), style: .plain, target: self, action: #selector(self.settingsPressed))
-        }
+        self.navigationItem.rightBarButtonItem = UIBarButtonItem(image: generateTintedImage(image: UIImage(bundleImageName: "Wallet/NavigationSettingsIcon"), color: .white), style: .plain, target: self, action: #selector(self.settingsPressed))
         
         self.navigationItem.titleView = WalletInfoTitleView(action: { [weak self] in self?.scrollToTop?() })
         
@@ -93,16 +91,15 @@ public final class WalletInfoScreen: ViewController {
     }
     
     @objc private func settingsPressed() {
-        if let walletInfo = self.walletInfo {
-            self.push(walletSettingsController(context: self.context, walletInfo: walletInfo))
-        }
+        self.push(walletSettingsController(context: self.context, walletInfo: self.walletInfo))
     }
     
     override public func loadDisplayNode() {
         self.displayNode = WalletInfoScreenNode(context: self.context, presentationData: self.presentationData, walletInfo: self.walletInfo, address: self.address, sendAction: { [weak self] in
-            guard let strongSelf = self, let walletInfo = strongSelf.walletInfo else {
+            guard let strongSelf = self else {
                 return
             }
+            let walletInfo = strongSelf.walletInfo
             guard let combinedState = (strongSelf.displayNode as! WalletInfoScreenNode).combinedState else {
                 return
             }
@@ -122,15 +119,26 @@ public final class WalletInfoScreen: ViewController {
                 strongSelf.push(walletSendScreen(context: strongSelf.context, randomId: randomId, walletInfo: walletInfo))
             }
         }, receiveAction: { [weak self] in
-            guard let strongSelf = self, let walletInfo = strongSelf.walletInfo else {
+            guard let strongSelf = self else {
                 return
             }
-            strongSelf.push(WalletReceiveScreen(context: strongSelf.context, mode: .receive(address: strongSelf.address)))
+            let _ = (walletAddress(walletInfo: strongSelf.walletInfo, tonInstance: strongSelf.context.tonInstance)
+            |> deliverOnMainQueue).start(next: { address in
+                guard let strongSelf = self else {
+                    return
+                }
+                strongSelf.push(WalletReceiveScreen(context: strongSelf.context, mode: .receive(address: address)))
+            })
         }, openTransaction: { [weak self] transaction in
             guard let strongSelf = self else {
                 return
             }
-            strongSelf.push(WalletTransactionInfoScreen(context: strongSelf.context, walletInfo: strongSelf.walletInfo, walletTransaction: transaction, walletState: (strongSelf.displayNode as! WalletInfoScreenNode).statePromise.get(), enableDebugActions: strongSelf.enableDebugActions))
+            strongSelf.push(WalletTransactionInfoScreen(context: strongSelf.context, walletInfo: strongSelf.walletInfo, walletTransaction: transaction, walletState: (strongSelf.displayNode as! WalletInfoScreenNode).statePromise.get(), enableDebugActions: strongSelf.enableDebugActions, decryptionKeyUpdated: { key in
+                guard let strongSelf = self else {
+                    return
+                }
+                (strongSelf.displayNode as! WalletInfoScreenNode).updateTransactionDecryptionKey(key)
+            }))
         }, present: { [weak self] c, a in
             guard let strongSelf = self else {
                 return
@@ -221,7 +229,6 @@ final class WalletInfoBalanceNode: ASDisplayNode {
         let balanceIntegralTextFrame = CGRect(origin: balanceOrigin, size: balanceIntegralTextSize)
         let apparentBalanceIntegralTextFrame = CGRect(origin: balanceIntegralTextFrame.origin, size: CGSize(width: balanceIntegralTextFrame.width * integralScale, height: balanceIntegralTextFrame.height * integralScale))
         var balanceFractionalTextFrame = CGRect(origin: CGPoint(x: balanceIntegralTextFrame.maxX, y: balanceIntegralTextFrame.maxY - balanceFractionalTextSize.height), size: balanceFractionalTextSize)
-        let apparentBalanceFractionalTextFrame = CGRect(origin: balanceFractionalTextFrame.origin, size: CGSize(width: balanceFractionalTextFrame.width * fractionalScale, height: balanceFractionalTextFrame.height * fractionalScale))
         
         balanceFractionalTextFrame.origin.x -= (balanceFractionalTextFrame.width / 4.0) * scaleTransition + 0.25 * (balanceFractionalTextFrame.width / 2.0) * (1.0 - scaleTransition)
         balanceFractionalTextFrame.origin.y += balanceFractionalTextFrame.height * 0.5 * (0.8 - fractionalScale)
@@ -270,7 +277,8 @@ private final class WalletInfoHeaderNode: ASDisplayNode {
     
     let balanceNode: WalletInfoBalanceNode
     let refreshNode: WalletRefreshNode
-    private let balanceSubtitleNode: ImmediateTextNode
+    let balanceSubtitleNode: ImmediateTextNode
+    let balanceSubtitleIconNode: AnimatedStickerNode
     private let receiveButtonNode: SolidRoundedButtonNode
     private let receiveGramsButtonNode: SolidRoundedButtonNode
     private let sendButtonNode: SolidRoundedButtonNode
@@ -284,7 +292,15 @@ private final class WalletInfoHeaderNode: ASDisplayNode {
         
         self.balanceSubtitleNode = ImmediateTextNode()
         self.balanceSubtitleNode.displaysAsynchronously = false
-        self.balanceSubtitleNode.attributedText = NSAttributedString(string: hasActions ? presentationData.strings.Wallet_Info_YourBalance : "balance", font: Font.regular(13), textColor: UIColor(white: 1.0, alpha: 0.6))
+        self.balanceSubtitleNode.attributedText = NSAttributedString(string: presentationData.strings.Wallet_Info_YourBalance, font: Font.regular(13), textColor: UIColor(white: 1.0, alpha: 0.6))
+        
+        self.balanceSubtitleIconNode = AnimatedStickerNode()
+        self.balanceSubtitleIconNode.isHidden = true
+        if let path = getAppBundle().path(forResource: "WalletIntroStatic", ofType: "tgs") {
+            self.balanceSubtitleIconNode.setup(source: AnimatedStickerNodeLocalFileSource(path: path), width: 36, height: 36, mode: .direct)
+            self.balanceSubtitleIconNode.visibility = true
+        }
+        self.balanceSubtitleNode.addSubnode(self.balanceSubtitleIconNode)
         
         self.headerBackgroundNode = ASDisplayNode()
         self.headerBackgroundNode.backgroundColor = .black
@@ -332,20 +348,8 @@ private final class WalletInfoHeaderNode: ASDisplayNode {
     
     func update(size: CGSize, navigationHeight: CGFloat, offset: CGFloat, transition: ContainedViewLayoutTransition, isScrolling: Bool) {
         let sideInset: CGFloat = 16.0
-        let buttonSideInset: CGFloat = 48.0
-        let titleSpacing: CGFloat = 10.0
-        let termsSpacing: CGFloat = 10.0
         let buttonHeight: CGFloat = 50.0
         let balanceSubtitleSpacing: CGFloat = 0.0
-        
-        let alphaTransition: ContainedViewLayoutTransition
-        if transition.isAnimated {
-            alphaTransition = transition
-        } else if isScrolling {
-            alphaTransition = .animated(duration: 0.2, curve: .easeInOut)
-        } else {
-            alphaTransition = transition
-        }
         
         let minOffset = navigationHeight
         let maxOffset = size.height
@@ -361,6 +365,9 @@ private final class WalletInfoHeaderNode: ASDisplayNode {
         let buttonAlpha: CGFloat = buttonTransition
         
         let balanceSubtitleSize = self.balanceSubtitleNode.updateLayout(CGSize(width: size.width - sideInset * 2.0, height: 200.0))
+        let balanceSubtitleIconSize = CGSize(width: 18.0, height: 18.0)
+        self.balanceSubtitleIconNode.frame = CGRect(origin: CGPoint(x: -balanceSubtitleIconSize.width - 2.0, y: -2.0), size: balanceSubtitleIconSize)
+        self.balanceSubtitleIconNode.updateLayout(size: balanceSubtitleIconSize)
         
         let headerScaleTransition: CGFloat = max(0.0, min(1.0, (effectiveOffset - minHeaderOffset) / (maxHeaderOffset - minHeaderOffset)))
         
@@ -438,11 +445,11 @@ private final class WalletInfoHeaderNode: ASDisplayNode {
         transition.updateAlpha(node: self.receiveGramsButtonNode, alpha: buttonAlpha, beginWithCurrentState: true)
         transition.updateFrame(node: self.receiveButtonNode, frame: leftButtonFrame)
         transition.updateAlpha(node: self.receiveButtonNode, alpha: buttonAlpha, beginWithCurrentState: true)
-        self.receiveGramsButtonNode.updateLayout(width: fullButtonFrame.width, transition: transition)
-        self.receiveButtonNode.updateLayout(width: leftButtonFrame.width, transition: transition)
+        let _ = self.receiveGramsButtonNode.updateLayout(width: fullButtonFrame.width, transition: transition)
+        let _ = self.receiveButtonNode.updateLayout(width: leftButtonFrame.width, transition: transition)
         transition.updateFrame(node: self.sendButtonNode, frame: sendButtonFrame)
         transition.updateAlpha(node: self.sendButtonNode, alpha: buttonAlpha, beginWithCurrentState: true)
-        self.sendButtonNode.updateLayout(width: sendButtonFrame.width, transition: transition)
+        let _ = self.sendButtonNode.updateLayout(width: sendButtonFrame.width, transition: transition)
     }
     
     override func hitTest(_ point: CGPoint, with event: UIEvent?) -> UIView? {
@@ -552,7 +559,7 @@ private func preparedTransition(from fromEntries: [WalletInfoListEntry], to toEn
 private final class WalletInfoScreenNode: ViewControllerTracingNode {
     private let context: WalletContext
     private var presentationData: WalletPresentationData
-    private let walletInfo: WalletInfo?
+    private let walletInfo: WalletInfo
     private let address: String
     
     private let openTransaction: (WalletInfoTransaction) -> Void
@@ -569,6 +576,8 @@ private final class WalletInfoScreenNode: ViewControllerTracingNode {
     
     private let stateDisposable = MetaDisposable()
     private let transactionListDisposable = MetaDisposable()
+    private let transactionDecryptionKey = Promise<WalletTransactionDecryptionKey?>(nil)
+    private var transactionDecryptionKeyDisposable: Disposable?
     
     private var listOffset: CGFloat?
     private(set) var reloadingState: Bool = false
@@ -591,7 +600,7 @@ private final class WalletInfoScreenNode: ViewControllerTracingNode {
     private var watchCombinedStateDisposable: Disposable?
     private var refreshProgressDisposable: Disposable?
     
-    init(context: WalletContext, presentationData: WalletPresentationData, walletInfo: WalletInfo?, address: String, sendAction: @escaping () -> Void, receiveAction: @escaping () -> Void, openTransaction: @escaping (WalletInfoTransaction) -> Void, present: @escaping (ViewController, Any?) -> Void) {
+    init(context: WalletContext, presentationData: WalletPresentationData, walletInfo: WalletInfo, address: String, sendAction: @escaping () -> Void, receiveAction: @escaping () -> Void, openTransaction: @escaping (WalletInfoTransaction) -> Void, present: @escaping (ViewController, Any?) -> Void) {
         self.context = context
         self.presentationData = presentationData
         self.walletInfo = walletInfo
@@ -599,13 +608,14 @@ private final class WalletInfoScreenNode: ViewControllerTracingNode {
         self.openTransaction = openTransaction
         self.present = present
         
-        self.headerNode = WalletInfoHeaderNode(presentationData: presentationData, hasActions: walletInfo != nil, sendAction: sendAction, receiveAction: receiveAction)
+        self.headerNode = WalletInfoHeaderNode(presentationData: presentationData, hasActions: true, sendAction: sendAction, receiveAction: receiveAction)
         
         self.listNode = ListView()
         self.listNode.verticalScrollIndicatorColor = UIColor(white: 0.0, alpha: 0.3)
         self.listNode.verticalScrollIndicatorFollowsOverscroll = true
         self.listNode.isHidden = false
         self.listNode.view.disablesInteractiveModalDismiss = true
+        //self.listNode.keepMinimalScrollHeightWithTopInset = 0.0
         
         super.init()
         
@@ -624,7 +634,7 @@ private final class WalletInfoScreenNode: ViewControllerTracingNode {
         }
         
         self.listNode.updateFloatingHeaderOffset = { [weak self] offset, listTransition in
-            guard let strongSelf = self, let (layout, navigationHeight) = strongSelf.validLayout else {
+            guard let strongSelf = self, let (_, navigationHeight) = strongSelf.validLayout else {
                 return
             }
             
@@ -658,13 +668,14 @@ private final class WalletInfoScreenNode: ViewControllerTracingNode {
         self.listNode.didEndScrolling = { [weak self] in
             canBeginRefresh = true
             
-            guard let strongSelf = self, let (_, navigationHeight) = strongSelf.validLayout else {
+            guard let strongSelf = self, let (_, _) = strongSelf.validLayout else {
                 return
             }
+            let topInset = strongSelf.listNode.insets.top - strongSelf.listNode.headerInsets.top
             switch strongSelf.listNode.visibleContentOffset() {
             case let .known(offset):
-                if offset < strongSelf.listNode.insets.top {
-                    if offset > strongSelf.listNode.insets.top / 2.0 {
+                if offset < topInset {
+                    if offset > topInset / 2.0 {
                         strongSelf.scrollToHideHeader()
                     } else {
                         strongSelf.scrollToTop()
@@ -685,33 +696,57 @@ private final class WalletInfoScreenNode: ViewControllerTracingNode {
         }, queue: .mainQueue())
         self.updateTimestampTimer?.start()
         
-        let subject: CombinedWalletStateSubject
-        if let walletInfo = walletInfo {
-            subject = .wallet(walletInfo)
+        let subject: CombinedWalletStateSubject = .wallet(walletInfo)
             
-            self.watchCombinedStateDisposable = (context.storage.watchWalletRecords()
-            |> deliverOnMainQueue).start(next: { [weak self] records in
-                guard let strongSelf = self else {
-                    return
-                }
-                for wallet in records {
-                    if wallet.info.publicKey == walletInfo.publicKey {
-                        if let state = wallet.state {
-                            if state.pendingTransactions != strongSelf.combinedState?.pendingTransactions || state.timestamp != strongSelf.combinedState?.timestamp {
-                                if !strongSelf.reloadingState {
-                                    strongSelf.updateCombinedState(combinedState: state, isUpdated: true)
-                                }
-                            }
-                        }
-                        break
+        let watchCombinedStateSignal = context.storage.watchWalletRecords()
+        |> map { records -> CombinedWalletState? in
+            for record in records {
+                switch record.info {
+                case let .ready(itemInfo, _, state):
+                    if itemInfo.publicKey == walletInfo.publicKey {
+                        return state
                     }
+                case .imported:
+                    break
                 }
-            })
-        } else {
-            subject = .address(address)
+            }
+            return nil
         }
+        |> distinctUntilChanged
+        
+        let tonInstance = self.context.tonInstance
+        let decryptedWalletState = combineLatest(queue: .mainQueue(),
+            watchCombinedStateSignal,
+            self.transactionDecryptionKey.get()
+        )
+        |> mapToSignal { maybeState, decryptionKey -> Signal<CombinedWalletState?, NoError> in
+            guard let state = maybeState, let decryptionKey = decryptionKey else {
+                return .single(maybeState)
+            }
+            return decryptWalletTransactions(decryptionKey: decryptionKey, transactions: state.topTransactions, tonInstance: tonInstance)
+            |> `catch` { _ -> Signal<[WalletTransaction], NoError> in
+                return .single(state.topTransactions)
+            }
+            |> map { transactions -> CombinedWalletState? in
+                return state.withTopTransactions(transactions)
+            }
+        }
+        
+        self.watchCombinedStateDisposable = (decryptedWalletState
+        |> deliverOnMainQueue).start(next: { [weak self] state in
+            guard let strongSelf = self, let state = state else {
+                return
+            }
+            
+            if state.pendingTransactions != strongSelf.combinedState?.pendingTransactions || state.timestamp != strongSelf.combinedState?.timestamp {
+                if !strongSelf.reloadingState {
+                    strongSelf.updateCombinedState(combinedState: state, isUpdated: true)
+                }
+            }
+        })
+        
         let pollCombinedState: Signal<Never, NoError> = (
-            getCombinedWalletState(storage: context.storage, subject: subject, tonInstance: context.tonInstance)
+            getCombinedWalletState(storage: context.storage, subject: subject, tonInstance: context.tonInstance, onlyCached: false)
             |> ignoreValues
             |> `catch` { _ -> Signal<Never, NoError> in
                 return .complete()
@@ -732,8 +767,82 @@ private final class WalletInfoScreenNode: ViewControllerTracingNode {
                 return
             }
             strongSelf.headerNode.refreshNode.refreshProgress = progress
-            if strongSelf.headerNode.isRefreshing, strongSelf.isReady, let (layout, navigationHeight) = strongSelf.validLayout {
+            if strongSelf.headerNode.isRefreshing, strongSelf.isReady, let (_, _) = strongSelf.validLayout {
                 strongSelf.headerNode.refreshNode.update(state: .refreshing)
+            }
+        })
+        
+        self.transactionDecryptionKeyDisposable = (self.transactionDecryptionKey.get()
+        |> deliverOnMainQueue).start(next: { [weak self] value in
+            guard let strongSelf = self else {
+                return
+            }
+            if let value = value, let currentEntries = strongSelf.currentEntries {
+                var encryptedTransactions: [WalletTransactionId: WalletTransaction] = [:]
+                for entry in currentEntries {
+                    switch entry {
+                    case .empty:
+                        break
+                    case let .transaction(_, transaction):
+                        switch transaction {
+                        case let .completed(transaction):
+                            var isEncrypted = false
+                            if let inMessage = transaction.inMessage {
+                                switch inMessage.contents {
+                                case .encryptedText:
+                                    isEncrypted = true
+                                default:
+                                    break
+                                }
+                            }
+                            for outMessage in transaction.outMessages {
+                                switch outMessage.contents {
+                                case .encryptedText:
+                                    isEncrypted = true
+                                default:
+                                    break
+                                }
+                            }
+                            if isEncrypted {
+                                encryptedTransactions[transaction.transactionId] = transaction
+                            }
+                        case .pending:
+                            break
+                        }
+                    }
+                }
+                
+                if !encryptedTransactions.isEmpty {
+                    let _ = (decryptWalletTransactions(decryptionKey: value, transactions: Array(encryptedTransactions.values), tonInstance: strongSelf.context.tonInstance)
+                    |> deliverOnMainQueue).start(next: { decryptedTransactions in
+                        guard let strongSelf = self else {
+                            return
+                        }
+                        var decryptedTransactionMap: [WalletTransactionId: WalletTransaction] = [:]
+                        for transaction in decryptedTransactions {
+                            decryptedTransactionMap[transaction.transactionId] = transaction
+                        }
+                        var updatedEntries: [WalletInfoListEntry] = []
+                        for entry in currentEntries {
+                            switch entry {
+                            case .empty:
+                                updatedEntries.append(entry)
+                            case let .transaction(index, transaction):
+                                switch transaction {
+                                case .pending:
+                                    updatedEntries.append(entry)
+                                case let .completed(transaction):
+                                    if let decryptedTransaction = decryptedTransactionMap[transaction.transactionId] {
+                                        updatedEntries.append(.transaction(index, .completed(decryptedTransaction)))
+                                    } else {
+                                        updatedEntries.append(entry)
+                                    }
+                                }
+                            }
+                        }
+                        strongSelf.replaceEntries(updatedEntries)
+                    })
+                }
             }
         })
     }
@@ -745,6 +854,11 @@ private final class WalletInfoScreenNode: ViewControllerTracingNode {
         self.pollCombinedStateDisposable?.dispose()
         self.watchCombinedStateDisposable?.dispose()
         self.refreshProgressDisposable?.dispose()
+        self.transactionDecryptionKeyDisposable?.dispose()
+    }
+    
+    func updateTransactionDecryptionKey(_ key: WalletTransactionDecryptionKey) {
+        self.transactionDecryptionKey.set(.single(key))
     }
     
     func scrollToHideHeader() {
@@ -804,14 +918,45 @@ private final class WalletInfoScreenNode: ViewControllerTracingNode {
         self.headerNode.isRefreshing = true
         self.headerNode.refreshNode.refreshProgress = 0.0
         
-        let subject: CombinedWalletStateSubject
-        if let walletInfo = self.walletInfo {
-            subject = .wallet(walletInfo)
-        } else {
-            subject = .address(self.address)
+        let subject: CombinedWalletStateSubject = .wallet(self.walletInfo)
+        
+        let transactionDecryptionKey = self.transactionDecryptionKey
+        let tonInstance = self.context.tonInstance
+        let processedWalletState = getCombinedWalletState(storage: self.context.storage, subject: subject, tonInstance: self.context.tonInstance, onlyCached: false)
+        |> mapToSignal { state -> Signal<CombinedWalletStateResult, GetCombinedWalletStateError> in
+            return transactionDecryptionKey.get()
+            |> castError(GetCombinedWalletStateError.self)
+            |> take(1)
+            |> mapToSignal { decryptionKey -> Signal<CombinedWalletStateResult, GetCombinedWalletStateError> in
+                guard let decryptionKey = decryptionKey else {
+                    return .single(state)
+                }
+                switch state {
+                case let .cached(value):
+                    if let value = value {
+                        return decryptWalletState(decryptionKey: decryptionKey, state: value, tonInstance: tonInstance)
+                        |> map { decryptedState -> CombinedWalletStateResult in
+                            return .cached(decryptedState)
+                        }
+                        |> `catch` { _ -> Signal<CombinedWalletStateResult, GetCombinedWalletStateError> in
+                            return .single(state)
+                        }
+                    } else {
+                        return .single(state)
+                    }
+                case let .updated(value):
+                    return decryptWalletState(decryptionKey: decryptionKey, state: value, tonInstance: tonInstance)
+                    |> map { decryptedState -> CombinedWalletStateResult in
+                        return .updated(decryptedState)
+                    }
+                    |> `catch` { _ -> Signal<CombinedWalletStateResult, GetCombinedWalletStateError> in
+                        return .single(state)
+                    }
+                }
+            }
         }
         
-        self.stateDisposable.set((getCombinedWalletState(storage: self.context.storage, subject: subject, tonInstance: self.context.tonInstance)
+        self.stateDisposable.set((processedWalletState
         |> deliverOnMainQueue).start(next: { [weak self] value in
             guard let strongSelf = self else {
                 return
@@ -842,7 +987,7 @@ private final class WalletInfoScreenNode: ViewControllerTracingNode {
                 strongSelf.headerNode.timestamp = Int32(clamping: combinedState.timestamp)
             }
                 
-            if strongSelf.isReady, let (layout, navigationHeight) = strongSelf.validLayout {
+            if strongSelf.isReady, let (_, navigationHeight) = strongSelf.validLayout {
                 strongSelf.headerNode.update(size: strongSelf.headerNode.bounds.size, navigationHeight: navigationHeight, offset: strongSelf.listOffset ?? 0.0, transition: .immediate, isScrolling: false)
             }
                 
@@ -851,7 +996,7 @@ private final class WalletInfoScreenNode: ViewControllerTracingNode {
                 
             strongSelf.headerNode.isRefreshing = false
                 
-            if strongSelf.isReady, let (layout, navigationHeight) = strongSelf.validLayout {
+            if strongSelf.isReady, let (_, navigationHeight) = strongSelf.validLayout {
                 strongSelf.headerNode.update(size: strongSelf.headerNode.bounds.size, navigationHeight: navigationHeight, offset: strongSelf.listOffset ?? 0.0, transition: .animated(duration: 0.2, curve: .easeInOut), isScrolling: false)
             }
             
@@ -877,8 +1022,28 @@ private final class WalletInfoScreenNode: ViewControllerTracingNode {
     private func updateCombinedState(combinedState: CombinedWalletState?, isUpdated: Bool) {
         self.combinedState = combinedState
         if let combinedState = combinedState {
-            self.headerNode.balanceNode.balance = (formatBalanceText(max(0, combinedState.walletState.balance), decimalSeparator: self.presentationData.dateTimeFormat.decimalSeparator), .white)
-            self.headerNode.balance = max(0, combinedState.walletState.balance)
+            self.headerNode.balanceNode.balance = (formatBalanceText(max(0, combinedState.walletState.effectiveAvailableBalance), decimalSeparator: self.presentationData.dateTimeFormat.decimalSeparator), .white)
+            if let unlockedBalance = combinedState.walletState.unlockedBalance {
+                let lockedBalance = combinedState.walletState.totalBalance - unlockedBalance
+                
+                if lockedBalance <= 0 {
+                    self.headerNode.balanceSubtitleNode.attributedText = NSAttributedString(string: self.presentationData.strings.Wallet_Info_YourBalance, font: Font.regular(13), textColor: UIColor(white: 1.0, alpha: 0.6))
+                    self.headerNode.balanceSubtitleIconNode.isHidden = true
+                } else {
+                    let balanceText = formatBalanceText(max(0, lockedBalance), decimalSeparator: self.presentationData.dateTimeFormat.decimalSeparator)
+                    
+                    let string = NSMutableAttributedString()
+                    string.append(NSAttributedString(string: "\(balanceText)", font: Font.semibold(13), textColor: .white))
+                    string.append(NSAttributedString(string: " locked", font: Font.regular(13), textColor: .white))
+                    
+                    self.headerNode.balanceSubtitleNode.attributedText = string
+                    self.headerNode.balanceSubtitleIconNode.isHidden = false
+                }
+            } else {
+                self.headerNode.balanceSubtitleNode.attributedText = NSAttributedString(string: self.presentationData.strings.Wallet_Info_YourBalance, font: Font.regular(13), textColor: UIColor(white: 1.0, alpha: 0.6))
+                self.headerNode.balanceSubtitleIconNode.isHidden = true
+            }
+            self.headerNode.balance = max(0, combinedState.walletState.effectiveAvailableBalance)
             
             if self.isReady, let (layout, navigationHeight) = self.validLayout {
                 self.containerLayoutUpdated(layout: layout, navigationHeight: navigationHeight, transition: .immediate)
@@ -890,7 +1055,7 @@ private final class WalletInfoScreenNode: ViewControllerTracingNode {
             
             self.headerNode.timestamp = Int32(clamping: combinedState.timestamp)
             
-            if self.isReady, let (layout, navigationHeight) = self.validLayout {
+            if self.isReady, let (_, navigationHeight) = self.validLayout {
                 self.headerNode.update(size: self.headerNode.bounds.size, navigationHeight: navigationHeight, offset: self.listOffset ?? 0.0, transition: .immediate, isScrolling: false)
             }
             
@@ -924,7 +1089,7 @@ private final class WalletInfoScreenNode: ViewControllerTracingNode {
                 self.headerNode.isRefreshing = false
             }
             
-            if self.isReady, let (layout, navigationHeight) = self.validLayout {
+            if self.isReady, let (_, navigationHeight) = self.validLayout {
                 self.headerNode.update(size: self.headerNode.bounds.size, navigationHeight: navigationHeight, offset: self.listOffset ?? 0.0, transition: .animated(duration: 0.2, curve: .easeInOut), isScrolling: false)
             }
         } else {
@@ -975,16 +1140,35 @@ private final class WalletInfoScreenNode: ViewControllerTracingNode {
                 break
             }
         }
-        self.transactionListDisposable.set((getWalletTransactions(address: self.address, previousId: lastTransactionId, tonInstance: self.context.tonInstance)
+        let transactionDecryptionKey = self.transactionDecryptionKey
+        let tonInstance = self.context.tonInstance
+        let requestTransactions = walletAddress(walletInfo: self.walletInfo, tonInstance: self.context.tonInstance)
+        |> castError(GetWalletTransactionsError.self)
+        |> mapToSignal { address -> Signal<[WalletTransaction], GetWalletTransactionsError> in
+            getWalletTransactions(address: address, previousId: lastTransactionId, tonInstance: tonInstance)
+        }
+        let processedTransactions = requestTransactions
+        |> mapToSignal { transactions -> Signal<[WalletTransaction], GetWalletTransactionsError> in
+            return transactionDecryptionKey.get()
+            |> castError(GetWalletTransactionsError.self)
+            |> take(1)
+            |> mapToSignal { decryptionKey -> Signal<[WalletTransaction], GetWalletTransactionsError> in
+                guard let decryptionKey = decryptionKey else {
+                    return .single(transactions)
+                }
+                return decryptWalletTransactions(decryptionKey: decryptionKey, transactions: transactions, tonInstance: tonInstance)
+                |> `catch` { _ -> Signal<[WalletTransaction], GetWalletTransactionsError> in
+                    return .single(transactions)
+                }
+            }
+        }
+        self.transactionListDisposable.set((processedTransactions
         |> deliverOnMainQueue).start(next: { [weak self] transactions in
             guard let strongSelf = self else {
                 return
             }
             strongSelf.transactionsLoaded(isReload: false, isEmpty: false, transactions: transactions, pendingTransactions: [])
-        }, error: { [weak self] _ in
-            guard let strongSelf = self else {
-                return
-            }
+        }, error: { _ in
         }))
     }
     
@@ -1024,7 +1208,7 @@ private final class WalletInfoScreenNode: ViewControllerTracingNode {
             var existingIds = Set<WalletInfoListEntryId>()
             for entry in updatedEntries {
                 switch entry {
-                case let .transaction(_, transaction):
+                case .transaction:
                     existingIds.insert(entry.stableId)
                 case .empty:
                     break
@@ -1041,6 +1225,10 @@ private final class WalletInfoScreenNode: ViewControllerTracingNode {
             }
         }
         
+        self.replaceEntries(updatedEntries)
+    }
+    
+    private func replaceEntries(_ updatedEntries: [WalletInfoListEntry]) {
         let transaction = preparedTransition(from: self.currentEntries ?? [], to: updatedEntries, presentationData: self.presentationData, action: { [weak self] transaction in
             guard let strongSelf = self else {
                 return
@@ -1069,7 +1257,7 @@ private final class WalletInfoScreenNode: ViewControllerTracingNode {
     }
     
     private func dequeueTransaction() {
-        guard let layout = self.validLayout, let transaction = self.enqueuedTransactions.first else {
+        guard let _ = self.validLayout, let transaction = self.enqueuedTransactions.first else {
             return
         }
         

@@ -482,7 +482,13 @@ final class ThemeGridSearchContentNode: SearchDisplayControllerContentNode {
                             if let searchContext = searchContext {
                                 if let _ = searchContext.loadMoreIndex, let nextOffset = searchContext.result.nextOffset {
                                     let collection = searchContext.result.collection
-                                    return requestChatContextResults(account: self.context.account, botId: collection.botId, peerId: collection.peerId, query: searchContext.result.query, location: .single(collection.geoPoint), offset: nextOffset)
+                                    let geoPoint = collection.geoPoint.flatMap { geoPoint -> (Double, Double) in
+                                        return (geoPoint.latitude, geoPoint.longitude)
+                                    }
+                                    return requestChatContextResults(account: self.context.account, botId: collection.botId, peerId: collection.peerId, query: searchContext.result.query, location: .single(geoPoint), offset: nextOffset)
+                                    |> map { results -> ChatContextResultCollection? in
+                                        return results?.results
+                                    }
                                     |> `catch` { error -> Signal<ChatContextResultCollection?, NoError> in
                                         return .single(nil)
                                     }
@@ -532,6 +538,9 @@ final class ThemeGridSearchContentNode: SearchDisplayControllerContentNode {
                         return (.complete() |> delay(0.1, queue: Queue.concurrentDefaultQueue()))
                         |> then(
                             requestContextResults(account: context.account, botId: user.id, query: wallpaperQuery, peerId: context.account.peerId, limit: 16)
+                            |> map { results -> ChatContextResultCollection? in
+                                return results?.results
+                            }
                             |> map { collection -> ([ThemeGridSearchEntry], Bool)? in
                                 guard let collection = collection else {
                                     return nil

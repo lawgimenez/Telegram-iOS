@@ -14,13 +14,13 @@
     You should have received a copy of the GNU Lesser General Public License
     along with TON Blockchain Library.  If not, see <http://www.gnu.org/licenses/>.
 
-    Copyright 2017-2019 Telegram Systems LLP
+    Copyright 2017-2020 Telegram Systems LLP
 */
 #pragma once
 
 #include "vm/cells.h"
 #include "vm/stack.hpp"
-#include "vm/continuation.h"
+#include "vm/vm.h"
 
 #include "td/utils/optional.h"
 #include "td/utils/crypto.h"
@@ -55,12 +55,19 @@ class SmartContract : public td::CntObject {
     td::optional<vm::GasLimits> limits;
     td::optional<td::Ref<vm::Tuple>> c7;
     td::optional<td::Ref<vm::Stack>> stack;
+    td::optional<td::int32> now;
     bool ignore_chksig{false};
+    td::uint64 amount{0};
+    td::uint64 balance{0};
 
     Args() {
     }
     Args(std::initializer_list<vm::StackEntry> stack)
         : stack(td::Ref<vm::Stack>(true, std::vector<vm::StackEntry>(std::move(stack)))) {
+    }
+    Args&& set_now(int now) {
+      this->now = now;
+      return std::move(*this);
     }
     Args&& set_method_id(td::Slice method_name) {
       unsigned crc = td::crc16(method_name);
@@ -90,12 +97,29 @@ class SmartContract : public td::CntObject {
       this->ignore_chksig = ignore_chksig;
       return std::move(*this);
     }
+    Args&& set_amount(td::uint64 amount) {
+      this->amount = amount;
+      return std::move(*this);
+    }
+    Args&& set_balance(td::uint64 balance) {
+      this->balance = balance;
+      return std::move(*this);
+    }
+
+    td::Result<td::int32> get_method_id() const {
+      if (!method_id) {
+        return td::Status::Error("Args has no method id");
+      }
+      return method_id.value();
+    }
+    td::Result<td::BufferSlice> get_serialized_stack();
   };
 
   Answer run_method(Args args = {});
   Answer run_get_method(Args args = {}) const;
   Answer run_get_method(td::Slice method, Args args = {}) const;
   Answer send_external_message(td::Ref<vm::Cell> cell, Args args = {});
+  Answer send_internal_message(td::Ref<vm::Cell> cell, Args args = {});
 
   size_t code_size() const;
   size_t data_size() const;
@@ -108,6 +132,9 @@ class SmartContract : public td::CntObject {
 
   const State& get_state() const {
     return state_;
+  }
+  CntObject* make_copy() const override {
+    return new SmartContract(state_);
   }
 
  protected:

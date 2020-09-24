@@ -29,30 +29,41 @@ private func generateBackground(foregroundColor: UIColor, diameter: CGFloat) -> 
 private class SearchBarTextField: UITextField {
     public var didDeleteBackwardWhileEmpty: (() -> Void)?
     
-    let placeholderLabel: ASTextNode
+    let placeholderLabel: ImmediateTextNode
     var placeholderString: NSAttributedString? {
         didSet {
             self.placeholderLabel.attributedText = self.placeholderString
+            self.setNeedsLayout()
         }
     }
     
-    let prefixLabel: ASTextNode
+    private let measurePrefixLabel: ImmediateTextNode
+    let prefixLabel: ImmediateTextNode
     var prefixString: NSAttributedString? {
         didSet {
+            self.measurePrefixLabel.attributedText = self.prefixString
             self.prefixLabel.attributedText = self.prefixString
+            self.setNeedsLayout()
         }
     }
     
     override init(frame: CGRect) {
-        self.placeholderLabel = ASTextNode()
+        self.placeholderLabel = ImmediateTextNode()
         self.placeholderLabel.isUserInteractionEnabled = false
         self.placeholderLabel.displaysAsynchronously = false
         self.placeholderLabel.maximumNumberOfLines = 1
         self.placeholderLabel.truncationMode = .byTruncatingTail
         
-        self.prefixLabel = ASTextNode()
+        self.measurePrefixLabel = ImmediateTextNode()
+        self.measurePrefixLabel.isUserInteractionEnabled = false
+        self.measurePrefixLabel.displaysAsynchronously = false
+        self.measurePrefixLabel.maximumNumberOfLines = 1
+        self.measurePrefixLabel.truncationMode = .byTruncatingTail
+        
+        self.prefixLabel = ImmediateTextNode()
         self.prefixLabel.isUserInteractionEnabled = false
         self.prefixLabel.displaysAsynchronously = false
+        self.prefixLabel.maximumNumberOfLines = 1
         self.prefixLabel.truncationMode = .byTruncatingTail
         
         super.init(frame: frame)
@@ -87,9 +98,9 @@ private class SearchBarTextField: UITextField {
         }
         var rect = bounds.insetBy(dx: 4.0, dy: 4.0)
         
-        let prefixSize = self.prefixLabel.measure(CGSize(width: floor(bounds.size.width * 0.7), height: bounds.size.height))
+        let prefixSize = self.measurePrefixLabel.updateLayout(CGSize(width: floor(bounds.size.width * 0.7), height: bounds.size.height))
         if !prefixSize.width.isZero {
-            let prefixOffset = prefixSize.width
+            let prefixOffset = prefixSize.width + 3.0
             rect.origin.x += prefixOffset
             rect.size.width -= prefixOffset
         }
@@ -115,10 +126,10 @@ private class SearchBarTextField: UITextField {
         }
         
         let textRect = self.textRect(forBounds: bounds)
-        let labelSize = self.placeholderLabel.measure(textRect.size)
+        let labelSize = self.placeholderLabel.updateLayout(textRect.size)
         self.placeholderLabel.frame = CGRect(origin: CGPoint(x: textRect.minX, y: textRect.minY + textOffset), size: labelSize)
         
-        let prefixSize = self.prefixLabel.measure(CGSize(width: floor(bounds.size.width * 0.7), height: bounds.size.height))
+        let prefixSize = self.prefixLabel.updateLayout(CGSize(width: floor(bounds.size.width * 0.7), height: bounds.size.height))
         let prefixBounds = bounds.insetBy(dx: 4.0, dy: 4.0)
         self.prefixLabel.frame = CGRect(origin: CGPoint(x: prefixBounds.minX, y: prefixBounds.minY + textOffset), size: prefixSize)
     }
@@ -241,7 +252,7 @@ public enum SearchBarStyle {
 
 public class SearchBarNode: ASDisplayNode, UITextFieldDelegate {
     public var cancel: (() -> Void)?
-    public var textUpdated: ((String) -> Void)?
+    public var textUpdated: ((String, String?) -> Void)?
     public var textReturned: ((String) -> Void)?
     public var clearPrefix: (() -> Void)?
     
@@ -325,11 +336,15 @@ public class SearchBarNode: ASDisplayNode, UITextFieldDelegate {
     private var validLayout: (CGSize, CGFloat, CGFloat)?
     
     private let fieldStyle: SearchBarStyle
+    private let forceSeparator: Bool
     private var theme: SearchBarNodeTheme?
     private var strings: PresentationStrings?
+    private let cancelText: String?
     
-    public init(theme: SearchBarNodeTheme, strings: PresentationStrings, fieldStyle: SearchBarStyle = .legacy) {
+    public init(theme: SearchBarNodeTheme, strings: PresentationStrings, fieldStyle: SearchBarStyle = .legacy, forceSeparator: Bool = false, cancelText: String? = nil) {
         self.fieldStyle = fieldStyle
+        self.forceSeparator = forceSeparator
+        self.cancelText = cancelText
         
         self.backgroundNode = ASDisplayNode()
         self.backgroundNode.isLayerBacked = true
@@ -353,13 +368,13 @@ public class SearchBarNode: ASDisplayNode, UITextFieldDelegate {
         self.textField.returnKeyType = .search
         self.textField.font = self.fieldStyle.font
         
-        self.clearButton = HighlightableButtonNode()
+        self.clearButton = HighlightableButtonNode(pointerStyle: .lift)
         self.clearButton.imageNode.displaysAsynchronously = false
         self.clearButton.imageNode.displayWithoutProcessing = true
         self.clearButton.displaysAsynchronously = false
         self.clearButton.isHidden = true
         
-        self.cancelButton = HighlightableButtonNode()
+        self.cancelButton = HighlightableButtonNode(pointerStyle: .default)
         self.cancelButton.hitTestSlop = UIEdgeInsets(top: -8.0, left: -8.0, bottom: -8.0, right: -8.0)
         self.cancelButton.displaysAsynchronously = false
         
@@ -389,11 +404,11 @@ public class SearchBarNode: ASDisplayNode, UITextFieldDelegate {
     
     public func updateThemeAndStrings(theme: SearchBarNodeTheme, strings: PresentationStrings) {
         if self.theme != theme || self.strings !== strings {
-            self.cancelButton.setAttributedTitle(NSAttributedString(string: strings.Common_Cancel, font: Font.regular(17.0), textColor: theme.accent), for: [])
+            self.cancelButton.setAttributedTitle(NSAttributedString(string: self.cancelText ?? strings.Common_Cancel, font: self.cancelText != nil ? Font.semibold(17.0) : Font.regular(17.0), textColor: theme.accent), for: [])
         }
         if self.theme != theme {
             self.backgroundNode.backgroundColor = theme.background
-            if self.fieldStyle != .modern {
+            if self.fieldStyle != .modern || self.forceSeparator {
                 self.separatorNode.backgroundColor = theme.separator
             }
             self.textBackgroundNode.backgroundColor = theme.inputFill
@@ -612,7 +627,7 @@ public class SearchBarNode: ASDisplayNode, UITextFieldDelegate {
     @objc private func textFieldDidChange(_ textField: UITextField) {
         self.updateIsEmpty()
         if let textUpdated = self.textUpdated {
-            textUpdated(textField.text ?? "")
+            textUpdated(textField.text ?? "", textField.textInputMode?.primaryLanguage)
         }
     }
     

@@ -1,8 +1,10 @@
 import Foundation
+import UIKit
 import Postbox
 import TelegramCore
 import SyncCore
 import TextFormat
+import AsyncDisplayKit
 import Display
 import SwiftSignalKit
 import TelegramPresentationData
@@ -25,7 +27,7 @@ public struct ChatControllerInitialBotStart {
 
 public enum ChatControllerInteractionNavigateToPeer {
     case `default`
-    case chat(textInputState: ChatTextInputState?, subject: ChatControllerSubject?)
+    case chat(textInputState: ChatTextInputState?, subject: ChatControllerSubject?, peekData: ChatPeekTimeout?)
     case info
     case withBotStartPayload(ChatControllerInitialBotStart)
 }
@@ -362,6 +364,8 @@ public enum ChatPresentationInputQueryResult: Equatable {
     }
 }
 
+public let ChatControllerCount = Atomic<Int32>(value: 0)
+
 public protocol ChatController: ViewController {
     var chatLocation: ChatLocation { get }
     var canReadHistory: ValuePromise<Bool> { get }
@@ -369,6 +373,7 @@ public protocol ChatController: ViewController {
     
     func updatePresentationMode(_ mode: ChatControllerPresentationMode)
     func beginMessageSearch(_ query: String)
+    func displayPromoAnnouncement(text: String)
 }
 
 public protocol ChatMessagePrevewItemNode: class {

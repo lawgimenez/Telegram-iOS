@@ -1460,7 +1460,7 @@ public func groupInfoController(context: AccountContext, peerId originalPeerId: 
                         if let data = image.jpegData(compressionQuality: 0.6) {
                             let resource = LocalFileMediaResource(fileId: arc4random64())
                             context.account.postbox.mediaBox.storeResourceData(resource.id, data: data)
-                            let representation = TelegramMediaImageRepresentation(dimensions: PixelDimensions(width: 640, height: 640), resource: resource)
+                            let representation = TelegramMediaImageRepresentation(dimensions: PixelDimensions(width: 640, height: 640), resource: resource, progressiveSizes: [])
                             updateState {
                                 $0.withUpdatedUpdatingAvatar(.image(representation, true))
                             }
@@ -1479,7 +1479,7 @@ public func groupInfoController(context: AccountContext, peerId originalPeerId: 
                         }
                     }
                     
-                    let mixin = TGMediaAvatarMenuMixin(context: legacyController.context, parentController: emptyController, hasSearchButton: true, hasDeleteButton: hasPhotos, hasViewButton: false, personalPhoto: false, saveEditedPhotos: false, saveCapturedMedia: false, signup: false)!
+                    let mixin = TGMediaAvatarMenuMixin(context: legacyController.context, parentController: emptyController, hasSearchButton: true, hasDeleteButton: hasPhotos, hasViewButton: false, personalPhoto: false, isVideo: false, saveEditedPhotos: false, saveCapturedMedia: false, signup: true)!
                     let _ = currentAvatarMixin.swap(mixin)
                     mixin.requestSearchController = { assetsController in
                         let controller = WebSearchController(context: context, peer: peer, configuration: searchBotsConfiguration, mode: .avatar(initialQuery: peer?.displayTitle(strings: presentationData.strings, displayOrder: presentationData.nameDisplayOrder), completion: { result in
@@ -1665,7 +1665,7 @@ public func groupInfoController(context: AccountContext, peerId originalPeerId: 
                         }
                     }))
                 } else {
-                    contactsController = context.sharedContext.makeContactMultiselectionController(ContactMultiselectionControllerParams(context: context, mode: .peerSelection(searchChatList: false, searchGroups: false), options: options, filters: [.excludeSelf, .disable(recentIds)]))
+                    contactsController = context.sharedContext.makeContactMultiselectionController(ContactMultiselectionControllerParams(context: context, mode: .peerSelection(searchChatList: false, searchGroups: false, searchChannels: false), options: options, filters: [.excludeSelf, .disable(recentIds)]))
                 }
                 
                 confirmationImpl = { [weak contactsController] peerId in
@@ -1750,7 +1750,7 @@ public func groupInfoController(context: AccountContext, peerId originalPeerId: 
                                         return state.withUpdatedTemporaryParticipants(temporaryParticipants).withUpdatedSuccessfullyAddedParticipantIds(successfullyAddedParticipantIds)
                                     }
                                     return .complete()
-                                case .privacy:
+                                case .privacy, .notMutualContact:
                                     let _ = (context.account.postbox.loadedPeerWithId(memberId)
                                     |> deliverOnMainQueue).start(next: { peer in
                                         presentControllerImpl?(textAlertController(context: context, title: nil, text: presentationData.strings.Privacy_GroupsAndChannels_InviteToGroupError(peer.compactDisplayTitle, peer.compactDisplayTitle).0, actions: [TextAlertAction(type: .genericAction, title: presentationData.strings.Common_OK, action: {})]), nil)
@@ -1896,7 +1896,7 @@ public func groupInfoController(context: AccountContext, peerId originalPeerId: 
                 if let contactsController = contactsController as? ContactSelectionController {
                     selectAddMemberDisposable.set((contactsController.result
                     |> deliverOnMainQueue).start(next: { [weak contactsController] memberPeer in
-                        guard let memberPeer = memberPeer else {
+                        guard let (memberPeer, _) = memberPeer else {
                             return
                         }
                         
@@ -1913,7 +1913,12 @@ public func groupInfoController(context: AccountContext, peerId originalPeerId: 
                 }
                 if let contactsController = contactsController as? ContactMultiselectionController {
                     selectAddMemberDisposable.set((contactsController.result
-                    |> deliverOnMainQueue).start(next: { [weak contactsController] peers in
+                    |> deliverOnMainQueue).start(next: { [weak contactsController] result in
+                        var peers: [ContactListPeerId] = []
+                        if case let .result(peerIdsValue, _) = result {
+                            peers = peerIdsValue
+                        }
+                        
                         contactsController?.displayProgress = true
                         addMemberDisposable.set((addMembers(peers)
                         |> deliverOnMainQueue).start(error: { error in
@@ -2434,7 +2439,7 @@ public func groupInfoController(context: AccountContext, peerId originalPeerId: 
         }
         for childController in tabController.controllers {
             if let chatListController = childController as? ChatListController {
-                chatListController.maybeAskForPeerChatRemoval(peer: RenderedPeer(peer: peer), deleteGloballyIfPossible: deleteGloballyIfPossible, completion: { [weak navigationController] removed in
+                chatListController.maybeAskForPeerChatRemoval(peer: RenderedPeer(peer: peer), joined: false, deleteGloballyIfPossible: deleteGloballyIfPossible, completion: { [weak navigationController] removed in
                     if removed {
                         navigationController?.popToRoot(animated: true)
                     }

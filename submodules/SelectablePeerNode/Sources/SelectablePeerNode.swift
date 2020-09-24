@@ -127,7 +127,7 @@ public final class SelectablePeerNode: ASDisplayNode {
         self.contextContainer.addSubnode(self.textNode)
         self.contextContainer.addSubnode(self.onlineNode)
         
-        self.contextContainer.activated = { [weak self] gesture in
+        self.contextContainer.activated = { [weak self] gesture, _ in
             guard let strongSelf = self, let contextAction = strongSelf.contextAction else {
                 gesture.cancel()
                 return
@@ -155,7 +155,7 @@ public final class SelectablePeerNode: ASDisplayNode {
                 overrideImage = .deletedIcon
             }
         }
-        self.textNode.maximumNumberOfLines = UInt(numberOfLines)
+        self.textNode.maximumNumberOfLines = numberOfLines
         self.textNode.attributedText = NSAttributedString(string: text, font: textFont, textColor: self.currentSelected ? self.theme.selectedTextColor : defaultColor, paragraphAlignment: .center)
         self.avatarNode.setPeer(context: context, theme: theme, peer: mainPeer, overrideImage: overrideImage, emptyColor: self.theme.avatarPlaceholderColor, synchronousLoad: synchronousLoad)
         

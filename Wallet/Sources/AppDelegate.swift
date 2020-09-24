@@ -595,7 +595,8 @@ final class AppDelegate: NSObject, UIApplicationDelegate {
                     secondaryColor: UIColor(rgb: 0x5e5e5e),
                     accentColor: accentColor,
                     destructiveColor: UIColor(rgb: 0xff3b30),
-                    disabledColor: UIColor(rgb: 0xd0d0d0)
+                    disabledColor: UIColor(rgb: 0xd0d0d0),
+                    baseFontSize: 17.0
                 ),
                 actionSheet: ActionSheetControllerTheme(
                     dimColor: UIColor(white: 0.0, alpha: 0.4),
@@ -611,7 +612,8 @@ final class AppDelegate: NSObject, UIApplicationDelegate {
                     controlColor: UIColor(rgb: 0x7e8791),
                     switchFrameColor: UIColor(rgb: 0xe0e0e0),
                     switchContentColor: UIColor(rgb: 0x77d572),
-                    switchHandleColor: UIColor(rgb: 0xffffff)
+                    switchHandleColor: UIColor(rgb: 0xffffff),
+                    baseFontSize: 17.0
                 )
             ), strings: WalletStrings(
                 primaryComponent: WalletStringsComponent(
@@ -687,11 +689,11 @@ final class AppDelegate: NSObject, UIApplicationDelegate {
             return lhs.0 == rhs.0 && lhs.1 == rhs.1
         })
         |> afterNext { (resolved, _) in
-            let _ = storage.updateMergedLocalWalletConfiguration { current in
+            let _ = storage.updateMergedLocalWalletConfiguration({ current in
                 var current = current
                 current.resolved = resolved
                 return current
-            }
+            }).start()
         }
         
         let resolvedInitialConfig = (
@@ -755,15 +757,28 @@ final class AppDelegate: NSObject, UIApplicationDelegate {
             |> deliverOnMainQueue).start(next: { records, publicKey in
                 if let record = records.first {
                     if let publicKey = publicKey {
-                        if record.info.encryptedSecret.publicKey == publicKey {
-                            if record.exportCompleted {
-                                let _ = (walletAddress(publicKey: record.info.publicKey, tonInstance: walletContext.tonInstance)
-                                |> deliverOnMainQueue).start(next: { address in
-                                    let infoScreen = WalletInfoScreen(context: walletContext, walletInfo: record.info, address: address, enableDebugActions: false)
-                                    beginWithController(infoScreen)
-                                })
-                            } else {
-                                let createdScreen = WalletSplashScreen(context: walletContext, mode: .created(record.info, nil), walletCreatedPreloadState: nil)
+                        let recordPublicKey: Data
+                        switch record.info {
+                        case let .ready(info, _, _):
+                            recordPublicKey = info.encryptedSecret.publicKey
+                        case let .imported(info):
+                            recordPublicKey = info.encryptedSecret.publicKey
+                        }
+                        if recordPublicKey == publicKey {
+                            switch record.info {
+                            case let .ready(info, exportCompleted, _):
+                                if exportCompleted {
+                                    let _ = (walletAddress(walletInfo: info, tonInstance: walletContext.tonInstance)
+                                    |> deliverOnMainQueue).start(next: { address in
+                                        let infoScreen = WalletInfoScreen(context: walletContext, walletInfo: info, address: address, enableDebugActions: false)
+                                        beginWithController(infoScreen)
+                                    })
+                                } else {
+                                    let createdScreen = WalletSplashScreen(context: walletContext, mode: .created(walletInfo: info, words: nil), walletCreatedPreloadState: nil)
+                                    beginWithController(createdScreen)
+                                }
+                            case let .imported(info):
+                                let createdScreen = WalletSplashScreen(context: walletContext, mode: .successfullyImported(importedInfo: info), walletCreatedPreloadState: nil)
                                 beginWithController(createdScreen)
                             }
                         } else {

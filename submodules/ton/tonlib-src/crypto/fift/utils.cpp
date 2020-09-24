@@ -14,7 +14,7 @@
     You should have received a copy of the GNU Lesser General Public License
     along with TON Blockchain Library.  If not, see <http://www.gnu.org/licenses/>.
 
-    Copyright 2017-2019 Telegram Systems LLP
+    Copyright 2017-2020 Telegram Systems LLP
 */
 #include "utils.h"
 #include "words.h"
@@ -45,6 +45,9 @@ td::Result<std::string> load_Lists_fif(std::string dir = "") {
 }
 td::Result<std::string> load_Lisp_fif(std::string dir = "") {
   return load_source("Lisp.fif", dir);
+}
+td::Result<std::string> load_GetOpt_fif(std::string dir = "") {
+  return load_source("GetOpt.fif", dir);
 }
 
 class MemoryFileLoader : public fift::FileLoader {
@@ -114,6 +117,10 @@ td::Result<fift::SourceLookup> create_source_lookup(std::string main, bool need_
     {
       TRY_RESULT(f, load_TonUtil_fif(dir));
       loader->add_file("/TonUtil.fif", std::move(f));
+    }
+    {
+      TRY_RESULT(f, load_GetOpt_fif(dir));
+      loader->add_file("/GetOpt.fif", std::move(f));
     }
   }
   if (need_lisp) {

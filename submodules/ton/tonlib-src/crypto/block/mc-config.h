@@ -14,7 +14,7 @@
     You should have received a copy of the GNU General Public License
     along with TON Blockchain.  If not, see <http://www.gnu.org/licenses/>.
 
-    Copyright 2017-2019 Telegram Systems LLP
+    Copyright 2017-2020 Telegram Systems LLP
 */
 #pragma once
 #include "common/refcnt.hpp"
@@ -71,6 +71,8 @@ struct ValidatorSet {
   }
   const ValidatorDescr& at_weight(td::uint64 weight_pos) const;
   std::vector<ton::ValidatorDescr> export_validator_set() const;
+  std::map<ton::Bits256, int> compute_validator_map() const;
+  std::vector<double> export_scaled_validator_weights() const;
 };
 
 #pragma pack(push, 1)
@@ -273,6 +275,7 @@ struct McShardHash : public McShardHashI {
   bool pack(vm::CellBuilder& cb) const;
   static Ref<McShardHash> unpack(vm::CellSlice& cs, ton::ShardIdFull id);
   static Ref<McShardHash> from_block(Ref<vm::Cell> block_root, const ton::FileHash& _fhash, bool init_fees = false);
+  static bool extract_cc_seqno(vm::CellSlice& cs, ton::CatchainSeqno* cc);
   McShardHash* make_copy() const override {
     return new McShardHash(*this);
   }
@@ -371,11 +374,14 @@ struct MsgPrices {
 
 struct CatchainValidatorsConfig {
   td::uint32 mc_cc_lifetime, shard_cc_lifetime, shard_val_lifetime, shard_val_num;
-  CatchainValidatorsConfig(td::uint32 mc_cc_lt_, td::uint32 sh_cc_lt_, td::uint32 sh_val_lt_, td::uint32 sh_val_num_)
+  bool shuffle_mc_val;
+  CatchainValidatorsConfig(td::uint32 mc_cc_lt_, td::uint32 sh_cc_lt_, td::uint32 sh_val_lt_, td::uint32 sh_val_num_,
+                           bool shuffle_mc = false)
       : mc_cc_lifetime(mc_cc_lt_)
       , shard_cc_lifetime(sh_cc_lt_)
       , shard_val_lifetime(sh_val_lt_)
-      , shard_val_num(sh_val_num_) {
+      , shard_val_num(sh_val_num_)
+      , shuffle_mc_val(shuffle_mc) {
   }
 };
 
@@ -534,6 +540,22 @@ class Config {
   bool create_stats_enabled() const {
     return has_capability(ton::capCreateStatsEnabled);
   }
+  std::unique_ptr<vm::Dictionary> get_param_dict(int idx) const;
+  td::Result<std::vector<int>> unpack_param_list(int idx) const;
+  std::unique_ptr<vm::Dictionary> get_mandatory_param_dict() const {
+    return get_param_dict(9);
+  }
+  std::unique_ptr<vm::Dictionary> get_critical_param_dict() const {
+    return get_param_dict(10);
+  }
+  td::Result<std::vector<int>> get_mandatory_param_list() const {
+    return unpack_param_list(9);
+  }
+  td::Result<std::vector<int>> get_critical_param_list() const {
+    return unpack_param_list(10);
+  }
+  bool all_mandatory_params_defined(int* bad_idx_ptr = nullptr) const;
+  td::Result<ton::StdSmcAddress> get_dns_root_addr() const;
   bool set_block_id_ext(const ton::BlockIdExt& block_id_ext);
   td::Result<std::vector<ton::StdSmcAddress>> get_special_smartcontracts(bool without_config = false) const;
   bool is_special_smartcontract(const ton::StdSmcAddress& addr) const;
@@ -558,6 +580,7 @@ class Config {
   const ValidatorSet* get_cur_validator_set() const {
     return cur_validators_.get();
   }
+  std::pair<ton::UnixTime, ton::UnixTime> get_validator_set_start_stop(int next = 0) const;
   ton::ValidatorSessionConfig get_consensus_config() const;
   bool foreach_config_param(std::function<bool(int, Ref<vm::Cell>)> scan_func) const;
   Ref<WorkchainInfo> get_workchain_info(ton::WorkchainId workchain_id) const;
@@ -577,6 +600,9 @@ class Config {
   static td::Result<std::unique_ptr<Config>> unpack_config(Ref<vm::CellSlice> config_csr, int mode = 0);
   static td::Result<std::unique_ptr<Config>> extract_from_state(Ref<vm::Cell> mc_state_root, int mode = 0);
   static td::Result<std::unique_ptr<Config>> extract_from_key_block(Ref<vm::Cell> key_block_root, int mode = 0);
+  static td::Result<std::pair<ton::UnixTime, ton::UnixTime>> unpack_validator_set_start_stop(Ref<vm::Cell> root);
+  static td::Result<std::vector<int>> unpack_param_dict(vm::Dictionary& dict);
+  static td::Result<std::vector<int>> unpack_param_dict(Ref<vm::Cell> dict_root);
 
  protected:
   Config(int _mode) : mode(_mode) {

@@ -15,8 +15,14 @@ public final class SolidRoundedButtonTheme {
     }
 }
 
+public enum SolidRoundedButtonFont {
+    case bold
+    case regular
+}
+
 public final class SolidRoundedButtonNode: ASDisplayNode {
     private var theme: SolidRoundedButtonTheme
+    private var font: SolidRoundedButtonFont
     
     private let buttonBackgroundNode: ASImageNode
     private let buttonGlossNode: SolidRoundedButtonGlossNode
@@ -47,15 +53,15 @@ public final class SolidRoundedButtonNode: ASDisplayNode {
         }
     }
     
-    public init(title: String? = nil, icon: UIImage? = nil, theme: SolidRoundedButtonTheme, height: CGFloat = 48.0, cornerRadius: CGFloat = 24.0, gloss: Bool = false) {
+    public init(title: String? = nil, icon: UIImage? = nil, theme: SolidRoundedButtonTheme, font: SolidRoundedButtonFont = .bold, height: CGFloat = 48.0, cornerRadius: CGFloat = 24.0, gloss: Bool = false) {
         self.theme = theme
+        self.font = font
         self.buttonHeight = height
         self.buttonCornerRadius = cornerRadius
         self.title = title
         
         self.buttonBackgroundNode = ASImageNode()
         self.buttonBackgroundNode.isLayerBacked = true
-        self.buttonBackgroundNode.displayWithoutProcessing = true
         self.buttonBackgroundNode.displaysAsynchronously = false
         self.buttonBackgroundNode.image = generateStretchableFilledCircleImage(radius: cornerRadius, color: theme.backgroundColor)
         
@@ -70,7 +76,6 @@ public final class SolidRoundedButtonNode: ASDisplayNode {
         self.subtitleNode.isUserInteractionEnabled = false
         
         self.iconNode = ASImageNode()
-        self.iconNode.displayWithoutProcessing = true
         self.iconNode.displaysAsynchronously = false
         self.iconNode.image = icon
         
@@ -119,7 +124,7 @@ public final class SolidRoundedButtonNode: ASDisplayNode {
         
         self.buttonBackgroundNode.image = generateStretchableFilledCircleImage(radius: self.buttonCornerRadius, color: theme.backgroundColor)
         self.buttonGlossNode.color = theme.foregroundColor
-        self.titleNode.attributedText = NSAttributedString(string: self.title ?? "", font: Font.semibold(17.0), textColor: theme.foregroundColor)
+        self.titleNode.attributedText = NSAttributedString(string: self.title ?? "", font: self.font == .bold ? Font.semibold(17.0) : Font.regular(17.0), textColor: theme.foregroundColor)
         self.subtitleNode.attributedText = NSAttributedString(string: self.subtitle ?? "", font: Font.regular(14.0), textColor: theme.foregroundColor)
     }
     
@@ -137,7 +142,7 @@ public final class SolidRoundedButtonNode: ASDisplayNode {
         transition.updateFrame(node: self.buttonNode, frame: buttonFrame)
         
         if self.title != self.titleNode.attributedText?.string {
-            self.titleNode.attributedText = NSAttributedString(string: self.title ?? "", font: Font.semibold(17.0), textColor: self.theme.foregroundColor)
+            self.titleNode.attributedText = NSAttributedString(string: self.title ?? "", font: self.font == .bold ? Font.semibold(17.0) : Font.regular(17.0), textColor: self.theme.foregroundColor)
         }
         
         let iconSize = self.iconNode.image?.size ?? CGSize()
@@ -156,7 +161,7 @@ public final class SolidRoundedButtonNode: ASDisplayNode {
         }
         
         let spacingOffset: CGFloat = 9.0
-        var verticalInset: CGFloat = self.subtitle == nil ? floor((buttonFrame.height - titleSize.height) / 2.0) : floor((buttonFrame.height - titleSize.height) / 2.0) - spacingOffset
+        let verticalInset: CGFloat = self.subtitle == nil ? floor((buttonFrame.height - titleSize.height) / 2.0) : floor((buttonFrame.height - titleSize.height) / 2.0) - spacingOffset
         
         let titleFrame = CGRect(origin: CGPoint(x: buttonFrame.minX + nextContentOrigin, y: buttonFrame.minY + verticalInset), size: titleSize)
         transition.updateFrame(node: self.titleNode, frame: titleFrame)

@@ -4,11 +4,7 @@ import SwiftSignalKit
 import Postbox
 import TelegramCore
 import SyncCore
-#if BUCK
 import MtProtoKit
-#else
-import MtProtoKitDynamic
-#endif
 import TelegramPresentationData
 import TelegramUIPreferences
 import AccountContext
@@ -286,9 +282,9 @@ private func resolveInternalUrl(account: Account, url: ParsedInternalUrl) -> Sig
                         }
                     } else {
                         if let peer = peer as? TelegramUser, peer.botInfo == nil {
-                            return .peer(peer.id, .chat(textInputState: nil, subject: nil))
+                            return .peer(peer.id, .chat(textInputState: nil, subject: nil, peekData: nil))
                         } else {
-                            return .peer(peer.id, .chat(textInputState: nil, subject: nil))
+                            return .peer(peer.id, .chat(textInputState: nil, subject: nil, peekData: nil))
                         }
                     }
                 } else {
@@ -301,7 +297,7 @@ private func resolveInternalUrl(account: Account, url: ParsedInternalUrl) -> Sig
             }
             |> mapToSignal { peer -> Signal<ResolvedUrl?, NoError> in
                 if let peer = peer {
-                    return .single(.peer(peer.id, .chat(textInputState: nil, subject: nil)))
+                    return .single(.peer(peer.id, .chat(textInputState: nil, subject: nil, peekData: nil)))
                 } else {
                     return .single(.inaccessiblePeer)
                 }
@@ -312,12 +308,12 @@ private func resolveInternalUrl(account: Account, url: ParsedInternalUrl) -> Sig
             }
             |> mapToSignal { peer -> Signal<ResolvedUrl?, NoError> in
                 if let peer = peer {
-                    return .single(.peer(peer.id, .chat(textInputState: nil, subject: .message(messageId))))
+                    return .single(.peer(peer.id, .chat(textInputState: nil, subject: .message(messageId), peekData: nil)))
                 } else {
                     return findChannelById(postbox: account.postbox, network: account.network, channelId: messageId.peerId.id)
                     |> map { foundPeer -> ResolvedUrl? in
                         if let foundPeer = foundPeer {
-                            return .peer(foundPeer.id, .chat(textInputState: nil, subject: .message(messageId)))
+                            return .peer(foundPeer.id, .chat(textInputState: nil, subject: .message(messageId), peekData: nil))
                         } else {
                             return .inaccessiblePeer
                         }
@@ -452,7 +448,7 @@ public func resolveUrlImpl(account: Account, url: String) -> Signal<ResolvedUrl,
             }
         }
     }
-    let baseTelegraPhPaths = ["telegra.ph/", "t.me/iv?"]
+    let baseTelegraPhPaths = ["telegra.ph/", "te.legra.ph/", "graph.org/", "t.me/iv?"]
     for basePath in baseTelegraPhPaths {
         for scheme in schemes {
             let basePrefix = scheme + basePath

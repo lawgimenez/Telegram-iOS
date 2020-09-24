@@ -55,6 +55,9 @@ public enum PresentationResourceKey: Int32 {
     case itemListCornersBottom
     case itemListCornersBoth
     
+    case itemListVoiceCallIcon
+    case itemListVideoCallIcon
+    
     case chatListLockTopUnlockedImage
     case chatListLockBottomUnlockedImage
     case chatListPending
@@ -101,6 +104,9 @@ public enum PresentationResourceKey: Int32 {
     case chatInstantVideoWithWallpaperBackgroundImage
     case chatInstantVideoWithoutWallpaperBackgroundImage
     
+    case chatActionPhotoWithWallpaperBackgroundImage
+    case chatActionPhotoWithoutWallpaperBackgroundImage
+    
     case chatUnreadBarBackgroundImage
     
     case chatBubbleFileCloudFetchMediaIcon
@@ -127,8 +133,11 @@ public enum PresentationResourceKey: Int32 {
     case chatInputMediaPanelTrendingIconImage
     case chatInputMediaPanelSettingsIconImage
     case chatInputMediaPanelAddPackButtonImage
+    case chatInputMediaPanelAddedPackButtonImage
     case chatInputMediaPanelGridSetupImage
     case chatInputMediaPanelGridDismissImage
+    case chatInputMediaPanelTrendingGifsIcon
+    case chatInputMediaPanelStickersModeIcon
     
     case chatInputButtonPanelButtonImage
     case chatInputButtonPanelButtonHighlightedImage
@@ -201,8 +210,12 @@ public enum PresentationResourceKey: Int32 {
     
     case chatBubbleIncomingCallButtonImage
     case chatBubbleOutgoingCallButtonImage
+    
+    case chatBubbleIncomingVideoCallButtonImage
+    case chatBubbleOutgoingVideoCallButtonImage
         
     case callListOutgoingIcon
+    case callListOutgoingVideoIcon
     case callListInfoButton
     
     case genericSearchBarLoupeImage
@@ -236,4 +249,11 @@ public enum PresentationResourceParameterKey: Hashable {
     
     case chatPrincipalThemeEssentialGraphics(hasWallpaper: Bool, bubbleCorners: PresentationChatBubbleCorners)
     case chatPrincipalThemeAdditionalGraphics(isCustomWallpaper: Bool, bubbleCorners: PresentationChatBubbleCorners)
+    
+    case chatBubbleLamp(incoming: Bool)
+    case chatPsaInfo(color: UInt32)
+    
+    case chatMessageLike(incoming: Bool, isSelected: Bool)
+    case chatMessageFreeLike(isSelected: Bool)
+    case chatMessageMediaLike(isSelected: Bool)
 }

@@ -44,6 +44,8 @@ struct ChatListNodeViewTransition {
     let options: ListViewDeleteAndInsertOptions
     let scrollToItem: ListViewScrollToItem?
     let stationaryItemRange: (Int, Int)?
+    let adjustScrollToFirstItem: Bool
+    let animateCrossfade: Bool
 }
 
 enum ChatListNodeViewScrollPosition {
@@ -70,7 +72,6 @@ func preparedChatListNodeViewTransition(from fromView: ChatListNodeView?, to toV
         
         var options: ListViewDeleteAndInsertOptions = []
         var maxAnimatedInsertionIndex = -1
-        var stationaryItemRange: (Int, Int)?
         var scrollToItem: ListViewScrollToItem?
         
         switch reason {
@@ -88,8 +89,8 @@ func preparedChatListNodeViewTransition(from fromView: ChatListNodeView?, to toV
                 var minTimestamp: Int32?
                 var maxTimestamp: Int32?
                 for (_, item, _) in indicesAndItems {
-                    if case .PeerEntry = item, item.sortIndex.pinningIndex == nil {
-                        let timestamp = item.sortIndex.messageIndex.timestamp
+                    if case .PeerEntry = item, case let .index(index) = item.sortIndex, index.pinningIndex == nil {
+                        let timestamp = index.messageIndex.timestamp
                         
                         if minTimestamp == nil || timestamp < minTimestamp! {
                             minTimestamp = timestamp
@@ -145,7 +146,7 @@ func preparedChatListNodeViewTransition(from fromView: ChatListNodeView?, to toV
                 case let .index(scrollIndex, position, directionHint, animated):
                     var index = toView.filteredEntries.count - 1
                     for entry in toView.filteredEntries {
-                        if entry.sortIndex >= scrollIndex {
+                        if entry.sortIndex >= .index(scrollIndex) {
                             scrollToItem = ListViewScrollToItem(index: index, position: position, animated: animated, curve: .Default(duration: nil), directionHint: directionHint)
                             break
                         }
@@ -155,7 +156,7 @@ func preparedChatListNodeViewTransition(from fromView: ChatListNodeView?, to toV
                     if scrollToItem == nil {
                         var index = 0
                         for entry in toView.filteredEntries.reversed() {
-                            if entry.sortIndex < scrollIndex {
+                            if entry.sortIndex < .index(scrollIndex) {
                                 scrollToItem = ListViewScrollToItem(index: index, position: position, animated: animated, curve: .Default(duration: nil), directionHint: directionHint)
                                 break
                             }
@@ -166,21 +167,54 @@ func preparedChatListNodeViewTransition(from fromView: ChatListNodeView?, to toV
         }
         
         var fromEmptyView = false
+        var animateCrossfade = false
         if let fromView = fromView {
-            if fromView.filteredEntries.isEmpty || fromView.filter != toView.filter {
-                options.remove(.AnimateInsertion)
-                options.remove(.AnimateAlpha)
-                fromEmptyView = true
+            var wasSingleHeader = false
+            if fromView.filteredEntries.count == 1, case .HeaderEntry = fromView.filteredEntries[0] {
+                wasSingleHeader = true
+            }
+            var isSingleHeader = false
+            if toView.filteredEntries.count == 1, case .HeaderEntry = toView.filteredEntries[0] {
+                isSingleHeader = true
+            }
+            if (wasSingleHeader || isSingleHeader), case .interactiveChanges = reason {
+                if wasSingleHeader != isSingleHeader {
+                    if wasSingleHeader {
+                        animateCrossfade = true
+                        options.remove(.AnimateInsertion)
+                        options.remove(.AnimateAlpha)
+                    } else {
+                        let _ = options.insert(.AnimateInsertion)
+                    }
+                }
+            } else if fromView.filteredEntries.isEmpty || fromView.filter != toView.filter {
+                var updateEmpty = true
+                if !fromView.filteredEntries.isEmpty, let fromFilter = fromView.filter, let toFilter = toView.filter, fromFilter.data.includePeers.pinnedPeers != toFilter.data.includePeers.pinnedPeers {
+                    var fromData = fromFilter.data
+                    let toData = toFilter.data
+                    fromData.includePeers = toData.includePeers
+                    if fromData == toData {
+                        options.insert(.AnimateInsertion)
+                        updateEmpty = false
+                    }
+                }
+                
+                if updateEmpty {
+                    options.remove(.AnimateInsertion)
+                    options.remove(.AnimateAlpha)
+                    fromEmptyView = true
+                }
             }
         } else {
             fromEmptyView = true
         }
         
+        var adjustScrollToFirstItem = false
         if !previewing && !searchMode && fromEmptyView && scrollToItem == nil && toView.filteredEntries.count >= 1 {
-            scrollToItem = ListViewScrollToItem(index: 0, position: .top(-navigationBarSearchContentHeight), animated: false, curve: .Default(duration: 0.0), directionHint: .Up)
+            adjustScrollToFirstItem = true
         }
         
-        subscriber.putNext(ChatListNodeViewTransition(chatListView: toView, deleteItems: adjustedDeleteIndices, insertEntries: adjustedIndicesAndItems, updateEntries: adjustedUpdateItems, options: options, scrollToItem: scrollToItem, stationaryItemRange: stationaryItemRange))
+        subscriber.putNext(ChatListNodeViewTransition(chatListView: toView, deleteItems: adjustedDeleteIndices, insertEntries: adjustedIndicesAndItems, updateEntries: adjustedUpdateItems, options: options, scrollToItem: scrollToItem, stationaryItemRange: nil, adjustScrollToFirstItem: adjustScrollToFirstItem, animateCrossfade: animateCrossfade))
         subscriber.putCompletion()
         
         return EmptyDisposable

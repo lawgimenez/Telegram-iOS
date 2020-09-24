@@ -212,6 +212,15 @@ public final class Transaction {
         self.postbox?.setPeerChatState(id, state: state)
     }
     
+    public func getGlobalNotificationSettings() -> PostboxGlobalNotificationSettings {
+        assert(!self.disposed)
+        if let postbox = self.postbox {
+            return postbox.getGlobalNotificationSettings()
+        } else {
+            preconditionFailure()
+        }
+    }
+    
     /*public func getPeerGroupState(_ id: PeerGroupId) -> PeerGroupState? {
         assert(!self.disposed)
         return self.postbox?.peerGroupStateTable.get(id)
@@ -303,10 +312,10 @@ public final class Transaction {
         return self.postbox?.chatListTable.getPeerChatListIndex(peerId: peerId)
     }
     
-    public func getUnreadChatListPeerIds(groupId: PeerGroupId) -> [PeerId] {
+    public func getUnreadChatListPeerIds(groupId: PeerGroupId, filterPredicate: ChatListFilterPredicate?) -> [PeerId] {
         assert(!self.disposed)
         if let postbox = self.postbox {
-            return postbox.chatListTable.getUnreadChatListPeerIds(postbox: postbox, groupId: groupId)
+            return postbox.chatListTable.getUnreadChatListPeerIds(postbox: postbox, groupId: groupId, filterPredicate: filterPredicate)
         } else {
             return []
         }
@@ -404,9 +413,14 @@ public final class Transaction {
         self.postbox?.replaceContactPeerIds(peerIds)
     }
     
-    public func replaceAdditionalChatListItems(_ peerIds: [PeerId]) {
+    public func replaceAdditionalChatListItems(_ items: [AdditionalChatListItem]) {
         assert(!self.disposed)
-        self.postbox?.replaceAdditionalChatListItems(peerIds)
+        self.postbox?.replaceAdditionalChatListItems(items)
+    }
+    
+    public func getAdditionalChatListItems() -> [AdditionalChatListItem] {
+        assert(!self.disposed)
+        return self.postbox?.additionalChatListItemsTable.get() ?? []
     }
     
     public func replaceRecentPeerIds(_ peerIds: [PeerId]) {
@@ -754,13 +768,59 @@ public final class Transaction {
         }
     }
     
-    public func getTotalUnreadState() -> ChatListTotalUnreadState {
+    public func getTotalUnreadState(groupId: PeerGroupId) -> ChatListTotalUnreadState {
         assert(!self.disposed)
         if let postbox = self.postbox {
-            return postbox.messageHistoryMetadataTable.getChatListTotalUnreadState()
+            return postbox.messageHistoryMetadataTable.getTotalUnreadState(groupId: groupId)
         } else {
             return ChatListTotalUnreadState(absoluteCounters: [:], filteredCounters: [:])
         }
+    }
+    
+    public func getChatCountMatchingPredicate(_ predicate: ChatListFilterPredicate) -> Int {
+        assert(!self.disposed)
+        guard let postbox = self.postbox else {
+            return 0
+        }
+        var includedPeerIds: [PeerId: Bool] = [:]
+        for peerId in predicate.includePeerIds {
+            includedPeerIds[peerId] = false
+        }
+        
+        var count = 0
+        
+        let globalNotificationSettings = self.getGlobalNotificationSettings()
+        
+        var groupIds: [PeerGroupId] = [.root]
+        groupIds.append(contentsOf: predicate.includeAdditionalPeerGroupIds)
+        for groupId in groupIds {
+            count += postbox.chatListTable.countWithPredicate(groupId: groupId, predicate: { peerId in
+                if let peer = postbox.peerTable.get(peerId) {
+                    let isUnread = postbox.readStateTable.getCombinedState(peerId)?.isUnread ?? false
+                    let notificationsPeerId = peer.notificationSettingsPeerId ?? peerId
+                    let isContact = postbox.contactsTable.isContact(peerId: notificationsPeerId)
+                    let isRemovedFromTotalUnreadCount = resolvedIsRemovedFromTotalUnreadCount(globalSettings: globalNotificationSettings, peer: peer, peerSettings: postbox.peerNotificationSettingsTable.getEffective(notificationsPeerId))
+                    let messageTagSummaryResult = resolveChatListMessageTagSummaryResultCalculation(postbox: postbox, peerId: peer.id, calculation: predicate.messageTagSummary)
+                    
+                    if predicate.includes(peer: peer, groupId: groupId, isRemovedFromTotalUnreadCount: isRemovedFromTotalUnreadCount, isUnread: isUnread, isContact: isContact, messageTagSummaryResult: messageTagSummaryResult) {
+                        includedPeerIds[peer.id] = true
+                        return true
+                    } else {
+                        return false
+                    }
+                } else {
+                    return false
+                }
+            })
+        }
+        for (peerId, included) in includedPeerIds {
+            if !included {
+                if postbox.chatListTable.getPeerChatListIndex(peerId: peerId) != nil {
+                    count += 1
+                }
+            }
+        }
+        return count
     }
     
     public func legacyGetAccessChallengeData() -> PostboxAccessChallengeData {
@@ -867,6 +927,11 @@ public final class Transaction {
         self.postbox?.replaceMessageTagSummary(peerId: peerId, tagMask: tagMask, namespace: namespace, count: count, maxId: maxId)
     }
     
+    public func getPendingMessageActionsSummary(peerId: PeerId, type: PendingMessageActionType, namespace: MessageId.Namespace) -> Int32? {
+        assert(!self.disposed)
+        return self.postbox?.pendingMessageActionsMetadataTable.getCount(.peerNamespaceAction(peerId, namespace, type))
+    }
+    
     public func getMessageIndicesWithTag(peerId: PeerId, namespace: MessageId.Namespace, tag: MessageTags) -> [MessageIndex] {
         assert(!self.disposed)
         guard let postbox = self.postbox else {
@@ -878,6 +943,10 @@ public final class Transaction {
     public func scanMessages(peerId: PeerId, namespace: MessageId.Namespace, tag: MessageTags, _ f: (Message) -> Bool) {
         assert(!self.disposed)
         self.postbox?.scanMessages(peerId: peerId, namespace: namespace, tag: tag, f)
+    }
+    
+    public func scanMessageAttributes(peerId: PeerId, namespace: MessageId.Namespace, limit: Int, _ f: (MessageId, [MessageAttribute]) -> Bool) {
+        self.postbox?.scanMessageAttributes(peerId: peerId, namespace: namespace, limit: limit, f)
     }
     
     public func invalidateMessageHistoryTagsSummary(peerId: PeerId, namespace: MessageId.Namespace, tagMask: MessageTags) {
@@ -1053,7 +1122,7 @@ public func openPostbox(basePath: String, seedConfiguration: SeedConfiguration, 
 }
 
 public final class Postbox {
-    private let queue: Queue
+    public let queue: Queue
     public let seedConfiguration: SeedConfiguration
     private let basePath: String
     let valueBox: SqliteValueBox
@@ -1082,7 +1151,7 @@ public final class Postbox {
     private var currentUpdatedCachedPeerData: [PeerId: CachedPeerData] = [:]
     private var currentUpdatedPeerPresences: [PeerId: PeerPresence] = [:]
     private var currentUpdatedPeerChatListEmbeddedStates: [PeerId: PeerChatListEmbeddedInterfaceState?] = [:]
-    private var currentUpdatedTotalUnreadState: ChatListTotalUnreadState?
+    private var currentUpdatedTotalUnreadStates: [PeerGroupId: ChatListTotalUnreadState] = [:]
     private var currentUpdatedGroupTotalUnreadSummaries: [PeerGroupId: PeerGroupUnreadCountersCombinedSummary] = [:]
     private var currentPeerMergedOperationLogOperations: [PeerMergedOperationLogOperation] = []
     private var currentTimestampBasedMessageAttributesOperations: [TimestampBasedMessageAttributesOperation] = []
@@ -1103,9 +1172,11 @@ public final class Postbox {
     private var currentReplacedContactPeerIds: Set<PeerId>?
     private var currentUpdatedMasterClientId: Int64?
     
-    private var currentReplacedAdditionalChatListItems: [PeerId]?
+    private var currentReplacedAdditionalChatListItems: [AdditionalChatListItem]?
     private var currentUpdatedNoticeEntryKeys = Set<NoticeEntryKey>()
     private var currentUpdatedCacheEntryKeys = Set<ItemCacheEntryId>()
+    
+    private var currentNeedsReindexUnreadCounters: Bool = false
     
     private let statePipe: ValuePipe<PostboxCoding> = ValuePipe()
     private var masterClientId = Promise<Int64>()
@@ -1343,8 +1414,6 @@ public final class Postbox {
             return self.cachedPeerDataTable.get(peerId)
         }, getPeerPresence: { peerId in
             return self.peerPresenceTable.get(peerId)
-        }, getTotalUnreadState: {
-            return self.messageHistoryMetadataTable.getChatListTotalUnreadState()
         }, getPeerReadState: { peerId in
             return self.readStateTable.getCombinedState(peerId)
         }, operationLogGetOperations: { tag, fromIndex, limit in
@@ -1367,16 +1436,19 @@ public final class Postbox {
                 self.messageHistoryMetadataTable.setShouldReindexUnreadCounts(value: true)
                 self.messageHistoryMetadataTable.setShouldReindexUnreadCountsState(value: reindexUnreadVersion)
             }
-            #if DEBUG
+            //#if DEBUG
             self.messageHistoryMetadataTable.setShouldReindexUnreadCounts(value: true)
-            #endif
+            //#endif
             
             if self.messageHistoryMetadataTable.shouldReindexUnreadCounts() {
                 self.groupMessageStatsTable.removeAll()
                 let startTime = CFAbsoluteTimeGetCurrent()
-                let (rootState, summaries) = self.chatListIndexTable.debugReindexUnreadCounts(postbox: self)
+                let (totalStates, summaries) = self.chatListIndexTable.debugReindexUnreadCounts(postbox: self)
                 
-                self.messageHistoryMetadataTable.setChatListTotalUnreadState(rootState)
+                self.messageHistoryMetadataTable.removeAllTotalUnreadStates()
+                for (groupId, state) in totalStates {
+                    self.messageHistoryMetadataTable.setTotalUnreadState(groupId: groupId, state: state)
+                }
                 for (groupId, summary) in summaries {
                     self.groupMessageStatsTable.set(groupId: groupId, summary: summary)
                 }
@@ -1393,7 +1465,7 @@ public final class Postbox {
                         flags.insert(.Failed)
                         var storeForwardInfo: StoreMessageForwardInfo?
                         if let forwardInfo = message.forwardInfo {
-                            storeForwardInfo = StoreMessageForwardInfo(authorId: forwardInfo.author?.id, sourceId: forwardInfo.source?.id, sourceMessageId: forwardInfo.sourceMessageId, date: forwardInfo.date, authorSignature: forwardInfo.authorSignature)
+                            storeForwardInfo = StoreMessageForwardInfo(authorId: forwardInfo.author?.id, sourceId: forwardInfo.source?.id, sourceMessageId: forwardInfo.sourceMessageId, date: forwardInfo.date, authorSignature: forwardInfo.authorSignature, psaType: forwardInfo.psaType)
                         }
                         return .update(StoreMessage(id: message.id, globallyUniqueId: message.globallyUniqueId, groupingKey: message.groupingKey, timestamp: message.timestamp, flags: flags, tags: message.tags, globalTags: message.globalTags, localTags: message.localTags, forwardInfo: storeForwardInfo, authorId: message.author?.id, text: message.text, attributes: message.attributes, media: message.media))
                     } else {
@@ -1598,7 +1670,7 @@ public final class Postbox {
         switch peerIds {
             case let .associated(_, messageId):
                 if let messageId = messageId, let readState = self.readStateTable.getCombinedState(messageId.peerId), readState.count != 0 {
-                    if let topMessage = self.messageHistoryTable.topMessage(messageId.peerId) {
+                    if let topMessage = self.messageHistoryTable.topMessage(peerId: messageId.peerId) {
                         let _ = self.messageHistoryTable.applyInteractiveMaxReadIndex(postbox: self, messageIndex: topMessage.index, operationsByPeerId: &self.currentOperationsByPeerId, updatedPeerReadStateOperations: &self.currentUpdatedSynchronizeReadStateOperations)
                     }
                 }
@@ -1653,60 +1725,6 @@ public final class Postbox {
         self.synchronizeGroupMessageStatsTable.set(groupId: groupId, namespace: namespace, needsValidation: false, operations: &self.currentUpdatedGroupSummarySynchronizeOperations)
     }
     
-    private func mappedChatListFilterPredicate(_ predicate: @escaping (Peer, PeerNotificationSettings?, Bool) -> Bool) -> (ChatListIntermediateEntry) -> Bool {
-        return { entry in
-            switch entry {
-            case let .message(index, _, _):
-                if let peer = self.peerTable.get(index.messageIndex.id.peerId) {
-                    let isUnread = self.readStateTable.getCombinedState(index.messageIndex.id.peerId)?.isUnread ?? false
-                    if predicate(peer, self.peerNotificationSettingsTable.getEffective(index.messageIndex.id.peerId), isUnread) {
-                        return true
-                    } else {
-                        return false
-                    }
-                } else {
-                    return false
-                }
-            case .hole:
-                return true
-            }
-        }
-    }
-    
-    func fetchAroundChatEntries(groupId: PeerGroupId, index: ChatListIndex, count: Int, filterPredicate: ((Peer, PeerNotificationSettings?, Bool) -> Bool)?) -> (entries: [MutableChatListEntry], earlier: MutableChatListEntry?, later: MutableChatListEntry?) {
-        let mappedPredicate = filterPredicate.flatMap(self.mappedChatListFilterPredicate)
-        let (intermediateEntries, intermediateLower, intermediateUpper) = self.chatListTable.entriesAround(groupId: groupId, index: index, messageHistoryTable: self.messageHistoryTable, peerChatInterfaceStateTable: self.peerChatInterfaceStateTable, count: count, predicate: mappedPredicate)
-        let entries: [MutableChatListEntry] = intermediateEntries.map { entry in
-            return MutableChatListEntry(entry, cachedDataTable: self.cachedPeerDataTable, readStateTable: self.readStateTable, messageHistoryTable: self.messageHistoryTable)
-        }
-        let lower: MutableChatListEntry? = intermediateLower.flatMap { entry in
-            return MutableChatListEntry(entry, cachedDataTable: self.cachedPeerDataTable, readStateTable: self.readStateTable, messageHistoryTable: self.messageHistoryTable)
-        }
-        let upper: MutableChatListEntry? = intermediateUpper.flatMap { entry in
-            return MutableChatListEntry(entry, cachedDataTable: self.cachedPeerDataTable, readStateTable: self.readStateTable, messageHistoryTable: self.messageHistoryTable)
-        }
-        
-        return (entries, lower, upper)
-    }
-    
-    func fetchEarlierChatEntries(groupId: PeerGroupId, index: ChatListIndex?, count: Int, filterPredicate: ((Peer, PeerNotificationSettings?, Bool) -> Bool)?) -> [MutableChatListEntry] {
-        let mappedPredicate = filterPredicate.flatMap(self.mappedChatListFilterPredicate)
-        let intermediateEntries = self.chatListTable.earlierEntries(groupId: groupId, index: index.flatMap({ ($0, true) }), messageHistoryTable: self.messageHistoryTable, peerChatInterfaceStateTable: self.peerChatInterfaceStateTable, count: count, predicate: mappedPredicate)
-        let entries: [MutableChatListEntry] = intermediateEntries.map { entry in
-            return MutableChatListEntry(entry, cachedDataTable: self.cachedPeerDataTable, readStateTable: self.readStateTable, messageHistoryTable: self.messageHistoryTable)
-        }
-        return entries
-    }
-    
-    func fetchLaterChatEntries(groupId: PeerGroupId, index: ChatListIndex?, count: Int, filterPredicate: ((Peer, PeerNotificationSettings?, Bool) -> Bool)?) -> [MutableChatListEntry] {
-        let mappedPredicate = filterPredicate.flatMap(self.mappedChatListFilterPredicate)
-        let intermediateEntries = self.chatListTable.laterEntries(groupId: groupId, index: index.flatMap({ ($0, true) }), messageHistoryTable: self.messageHistoryTable, peerChatInterfaceStateTable: self.peerChatInterfaceStateTable, count: count, predicate: mappedPredicate)
-        let entries: [MutableChatListEntry] = intermediateEntries.map { entry in
-            return MutableChatListEntry(entry, cachedDataTable: self.cachedPeerDataTable, readStateTable: self.readStateTable, messageHistoryTable: self.messageHistoryTable)
-        }
-        return entries
-    }
-    
     func renderIntermediateMessage(_ message: IntermediateMessage) -> Message {
         let renderedMessage = self.messageHistoryTable.renderMessage(message, peerTable: self.peerTable)
         
@@ -1738,11 +1756,34 @@ public final class Postbox {
         self.peerChatTopTaggedMessageIdsTable.replay(historyOperationsByPeerId: self.currentOperationsByPeerId)
         
         let alteredInitialPeerCombinedReadStates = self.readStateTable.transactionAlteredInitialPeerCombinedReadStates()
-        let updatedPeers = self.peerTable.transactionUpdatedPeers()
+        var updatedPeers = self.peerTable.transactionUpdatedPeers(contactsTable: self.contactsTable)
+        let updatedContacts = self.contactsTable.transactionUpdatedPeers()
+        if !updatedContacts.isEmpty {
+            var updatedPeerIdToIndex: [PeerId: Int] = [:]
+            var index = 0
+            for (_, peer) in updatedPeers {
+                updatedPeerIdToIndex[peer.0.id] = index
+            }
+            index += 1
+            for (peerId, change) in updatedContacts {
+                if let index = updatedPeerIdToIndex[peerId] {
+                    if let (peer, _) = updatedPeers[index].0 {
+                        updatedPeers[index].0 = (peer, change.0)
+                    }
+                    updatedPeers[index].1 = (updatedPeers[index].1.0, change.1)
+                } else if let peer = self.peerTable.get(peerId) {
+                    updatedPeers.append(((peer, change.0), (peer, change.1)))
+                }
+            }
+        }
         let transactionParticipationInTotalUnreadCountUpdates = self.peerNotificationSettingsTable.transactionParticipationInTotalUnreadCountUpdates(postbox: self)
-        self.chatListIndexTable.commitWithTransaction(postbox: self, alteredInitialPeerCombinedReadStates: alteredInitialPeerCombinedReadStates, updatedPeers: updatedPeers, transactionParticipationInTotalUnreadCountUpdates: transactionParticipationInTotalUnreadCountUpdates, updatedRootUnreadState: &self.currentUpdatedTotalUnreadState, updatedGroupTotalUnreadSummaries: &self.currentUpdatedGroupTotalUnreadSummaries, currentUpdatedGroupSummarySynchronizeOperations: &self.currentUpdatedGroupSummarySynchronizeOperations)
+        self.chatListIndexTable.commitWithTransaction(postbox: self, alteredInitialPeerCombinedReadStates: alteredInitialPeerCombinedReadStates, updatedPeers: updatedPeers, transactionParticipationInTotalUnreadCountUpdates: transactionParticipationInTotalUnreadCountUpdates, updatedTotalUnreadStates: &self.currentUpdatedTotalUnreadStates, updatedGroupTotalUnreadSummaries: &self.currentUpdatedGroupTotalUnreadSummaries, currentUpdatedGroupSummarySynchronizeOperations: &self.currentUpdatedGroupSummarySynchronizeOperations)
         
-        let transaction = PostboxTransaction(currentUpdatedState: self.currentUpdatedState, currentPeerHoleOperations: self.currentPeerHoleOperations, currentOperationsByPeerId: self.currentOperationsByPeerId, chatListOperations: self.currentChatListOperations, currentUpdatedChatListInclusions: self.currentUpdatedChatListInclusions, currentUpdatedPeers: self.currentUpdatedPeers, currentUpdatedPeerNotificationSettings: self.currentUpdatedPeerNotificationSettings, currentUpdatedPeerNotificationBehaviorTimestamps: self.currentUpdatedPeerNotificationBehaviorTimestamps, currentUpdatedCachedPeerData: self.currentUpdatedCachedPeerData, currentUpdatedPeerPresences: currentUpdatedPeerPresences, currentUpdatedPeerChatListEmbeddedStates: self.currentUpdatedPeerChatListEmbeddedStates, currentUpdatedTotalUnreadState: self.currentUpdatedTotalUnreadState, currentUpdatedTotalUnreadSummaries: self.currentUpdatedGroupTotalUnreadSummaries, alteredInitialPeerCombinedReadStates: alteredInitialPeerCombinedReadStates, currentPeerMergedOperationLogOperations: self.currentPeerMergedOperationLogOperations, currentTimestampBasedMessageAttributesOperations: self.currentTimestampBasedMessageAttributesOperations, unsentMessageOperations: self.currentUnsentOperations, updatedSynchronizePeerReadStateOperations: self.currentUpdatedSynchronizeReadStateOperations, currentUpdatedGroupSummarySynchronizeOperations: self.currentUpdatedGroupSummarySynchronizeOperations, currentPreferencesOperations: self.currentPreferencesOperations, currentOrderedItemListOperations: self.currentOrderedItemListOperations, currentItemCollectionItemsOperations: self.currentItemCollectionItemsOperations, currentItemCollectionInfosOperations: self.currentItemCollectionInfosOperations, currentUpdatedPeerChatStates: self.currentUpdatedPeerChatStates, currentGlobalTagsOperations: self.currentGlobalTagsOperations, currentLocalTagsOperations: self.currentLocalTagsOperations, updatedMedia: self.currentUpdatedMedia, replaceRemoteContactCount: self.currentReplaceRemoteContactCount, replaceContactPeerIds: self.currentReplacedContactPeerIds, currentPendingMessageActionsOperations: self.currentPendingMessageActionsOperations, currentUpdatedMessageActionsSummaries: self.currentUpdatedMessageActionsSummaries, currentUpdatedMessageTagSummaries: self.currentUpdatedMessageTagSummaries, currentInvalidateMessageTagSummaries: self.currentInvalidateMessageTagSummaries, currentUpdatedPendingPeerNotificationSettings: self.currentUpdatedPendingPeerNotificationSettings, replacedAdditionalChatListItems: self.currentReplacedAdditionalChatListItems, updatedNoticeEntryKeys: self.currentUpdatedNoticeEntryKeys, updatedCacheEntryKeys: self.currentUpdatedCacheEntryKeys, currentUpdatedMasterClientId: currentUpdatedMasterClientId, updatedFailedMessagePeerIds: self.messageHistoryFailedTable.updatedPeerIds, updatedFailedMessageIds: self.messageHistoryFailedTable.updatedMessageIds)
+        if self.currentNeedsReindexUnreadCounters {
+            self.reindexUnreadCounters()
+        }
+        
+        let transaction = PostboxTransaction(currentUpdatedState: self.currentUpdatedState, currentPeerHoleOperations: self.currentPeerHoleOperations, currentOperationsByPeerId: self.currentOperationsByPeerId, chatListOperations: self.currentChatListOperations, currentUpdatedChatListInclusions: self.currentUpdatedChatListInclusions, currentUpdatedPeers: self.currentUpdatedPeers, currentUpdatedPeerNotificationSettings: self.currentUpdatedPeerNotificationSettings, currentUpdatedPeerNotificationBehaviorTimestamps: self.currentUpdatedPeerNotificationBehaviorTimestamps, currentUpdatedCachedPeerData: self.currentUpdatedCachedPeerData, currentUpdatedPeerPresences: currentUpdatedPeerPresences, currentUpdatedPeerChatListEmbeddedStates: self.currentUpdatedPeerChatListEmbeddedStates, currentUpdatedTotalUnreadStates: self.currentUpdatedTotalUnreadStates, currentUpdatedTotalUnreadSummaries: self.currentUpdatedGroupTotalUnreadSummaries, alteredInitialPeerCombinedReadStates: alteredInitialPeerCombinedReadStates, currentPeerMergedOperationLogOperations: self.currentPeerMergedOperationLogOperations, currentTimestampBasedMessageAttributesOperations: self.currentTimestampBasedMessageAttributesOperations, unsentMessageOperations: self.currentUnsentOperations, updatedSynchronizePeerReadStateOperations: self.currentUpdatedSynchronizeReadStateOperations, currentUpdatedGroupSummarySynchronizeOperations: self.currentUpdatedGroupSummarySynchronizeOperations, currentPreferencesOperations: self.currentPreferencesOperations, currentOrderedItemListOperations: self.currentOrderedItemListOperations, currentItemCollectionItemsOperations: self.currentItemCollectionItemsOperations, currentItemCollectionInfosOperations: self.currentItemCollectionInfosOperations, currentUpdatedPeerChatStates: self.currentUpdatedPeerChatStates, currentGlobalTagsOperations: self.currentGlobalTagsOperations, currentLocalTagsOperations: self.currentLocalTagsOperations, updatedMedia: self.currentUpdatedMedia, replaceRemoteContactCount: self.currentReplaceRemoteContactCount, replaceContactPeerIds: self.currentReplacedContactPeerIds, currentPendingMessageActionsOperations: self.currentPendingMessageActionsOperations, currentUpdatedMessageActionsSummaries: self.currentUpdatedMessageActionsSummaries, currentUpdatedMessageTagSummaries: self.currentUpdatedMessageTagSummaries, currentInvalidateMessageTagSummaries: self.currentInvalidateMessageTagSummaries, currentUpdatedPendingPeerNotificationSettings: self.currentUpdatedPendingPeerNotificationSettings, replacedAdditionalChatListItems: self.currentReplacedAdditionalChatListItems, updatedNoticeEntryKeys: self.currentUpdatedNoticeEntryKeys, updatedCacheEntryKeys: self.currentUpdatedCacheEntryKeys, currentUpdatedMasterClientId: currentUpdatedMasterClientId, updatedFailedMessagePeerIds: self.messageHistoryFailedTable.updatedPeerIds, updatedFailedMessageIds: self.messageHistoryFailedTable.updatedMessageIds, updatedGlobalNotificationSettings: self.currentNeedsReindexUnreadCounters)
         var updatedTransactionState: Int64?
         var updatedMasterClientId: Int64?
         if !transaction.isEmpty {
@@ -1779,7 +1820,7 @@ public final class Postbox {
         self.currentUpdatedCachedPeerData.removeAll()
         self.currentUpdatedPeerPresences.removeAll()
         self.currentUpdatedPeerChatListEmbeddedStates.removeAll()
-        self.currentUpdatedTotalUnreadState = nil
+        self.currentUpdatedTotalUnreadStates.removeAll()
         self.currentUpdatedGroupTotalUnreadSummaries.removeAll()
         self.currentPeerMergedOperationLogOperations.removeAll()
         self.currentTimestampBasedMessageAttributesOperations.removeAll()
@@ -1794,6 +1835,7 @@ public final class Postbox {
         self.currentInvalidateMessageTagSummaries.removeAll()
         self.currentUpdatedPendingPeerNotificationSettings.removeAll()
         self.currentGroupIdsWithUpdatedReadStats.removeAll()
+        self.currentNeedsReindexUnreadCounters = false
         
         for table in self.tables {
             table.beforeCommit()
@@ -2009,10 +2051,9 @@ public final class Postbox {
         self.currentReplacedContactPeerIds = peerIds
     }
     
-    fileprivate func replaceAdditionalChatListItems(_ peerIds: [PeerId]) {
-        assert(peerIds.count == Set(peerIds).count)
-        if self.additionalChatListItemsTable.set(peerIds) {
-            self.currentReplacedAdditionalChatListItems = peerIds
+    fileprivate func replaceAdditionalChatListItems(_ items: [AdditionalChatListItem]) {
+        if self.additionalChatListItemsTable.set(items) {
+            self.currentReplacedAdditionalChatListItems = items
         }
     }
     
@@ -2415,7 +2456,7 @@ public final class Postbox {
                 case let .peerChatState(peerId):
                     additionalDataEntries.append(.peerChatState(peerId, self.peerChatStateTable.get(peerId) as? PeerChatState))
                 case .totalUnreadState:
-                    additionalDataEntries.append(.totalUnreadState(self.messageHistoryMetadataTable.getChatListTotalUnreadState()))
+                    additionalDataEntries.append(.totalUnreadState(self.messageHistoryMetadataTable.getTotalUnreadState(groupId: .root)))
                 case let .peerNotificationSettings(peerId):
                     var notificationPeerId = peerId
                     if let peer = self.peerTable.get(peerId), let associatedPeerId = peer.associatedPeerId {
@@ -2546,11 +2587,11 @@ public final class Postbox {
         |> switchToLatest
     }
     
-    public func tailChatListView(groupId: PeerGroupId, filterPredicate: ((Peer, PeerNotificationSettings?, Bool) -> Bool)? = nil, count: Int, summaryComponents: ChatListEntrySummaryComponents) -> Signal<(ChatListView, ViewUpdateType), NoError> {
+    public func tailChatListView(groupId: PeerGroupId, filterPredicate: ChatListFilterPredicate? = nil, count: Int, summaryComponents: ChatListEntrySummaryComponents) -> Signal<(ChatListView, ViewUpdateType), NoError> {
         return self.aroundChatListView(groupId: groupId, filterPredicate: filterPredicate, index: ChatListIndex.absoluteUpperBound, count: count, summaryComponents: summaryComponents, userInteractive: true)
     }
     
-    public func aroundChatListView(groupId: PeerGroupId, filterPredicate: ((Peer, PeerNotificationSettings?, Bool) -> Bool)? = nil, index: ChatListIndex, count: Int, summaryComponents: ChatListEntrySummaryComponents, userInteractive: Bool = false) -> Signal<(ChatListView, ViewUpdateType), NoError> {
+    public func aroundChatListView(groupId: PeerGroupId, filterPredicate: ChatListFilterPredicate? = nil, index: ChatListIndex, count: Int, summaryComponents: ChatListEntrySummaryComponents, userInteractive: Bool = false) -> Signal<(ChatListView, ViewUpdateType), NoError> {
         return self.transactionSignal(userInteractive: userInteractive, { subscriber, transaction in
             let mutableView = MutableChatListView(postbox: self, groupId: groupId, filterPredicate: filterPredicate, aroundIndex: index, count: count, summaryComponents: summaryComponents)
             mutableView.render(postbox: self, renderMessage: self.renderIntermediateMessage, getPeer: { id in
@@ -2844,6 +2885,7 @@ public final class Postbox {
             let disposable = MetaDisposable()
             self.queue.async {
                 disposable.set(self.viewTracker.unsentMessageIdsViewSignal().start(next: { view in
+                    postboxLog("unsentMessageIdsView contents: \(view.ids)")
                     subscriber.putNext(view)
                 }))
             }
@@ -3057,6 +3099,14 @@ public final class Postbox {
     }
     
     fileprivate func setPreferencesEntry(key: ValueBoxKey, value: PreferencesEntry?) {
+        if key == self.seedConfiguration.globalNotificationSettingsPreferencesKey {
+            let current = self.getGlobalNotificationSettings()
+            let updated = value as? PostboxGlobalNotificationSettings ?? self.seedConfiguration.defaultGlobalNotificationSettings
+            if !current.isEqualInDefaultPeerInclusion(other: updated) {
+                self.currentNeedsReindexUnreadCounters = true
+            }
+        }
+        
         self.preferencesTable.set(key: key, value: value, operations: &self.currentPreferencesOperations)
     }
     
@@ -3118,6 +3168,26 @@ public final class Postbox {
             }
             if let last = indices.last {
                 index = last
+            } else {
+                break
+            }
+        }
+    }
+    
+    fileprivate func scanMessageAttributes(peerId: PeerId, namespace: MessageId.Namespace, limit: Int, _ f: (MessageId, [MessageAttribute]) -> Bool) {
+        var remainingLimit = limit
+        var index = MessageIndex.upperBound(peerId: peerId, namespace: namespace)
+        while remainingLimit > 0 {
+            let messages = self.messageHistoryTable.fetch(peerId: peerId, namespace: namespace, tag: nil, from: index, includeFrom: false, to: MessageIndex.lowerBound(peerId: peerId, namespace: namespace), limit: 32)
+            for message in messages {
+                let attributes = MessageHistoryTable.renderMessageAttributes(message)
+                if !f(message.id, attributes) {
+                    break
+                }
+            }
+            remainingLimit -= messages.count
+            if let last = messages.last {
+                index = last.index
             } else {
                 break
             }
@@ -3187,6 +3257,10 @@ public final class Postbox {
         }
     }
     
+    func getGlobalNotificationSettings() -> PostboxGlobalNotificationSettings {
+        return self.preferencesTable.get(key: self.seedConfiguration.globalNotificationSettingsPreferencesKey) as? PostboxGlobalNotificationSettings ?? self.seedConfiguration.defaultGlobalNotificationSettings
+    }
+    
     public func isMasterClient() -> Signal<Bool, NoError> {
         return self.transaction { transaction -> Signal<Bool, NoError> in
             let sessionClientId = self.sessionClientId
@@ -3231,11 +3305,15 @@ public final class Postbox {
     
     fileprivate func reindexUnreadCounters() {
         self.groupMessageStatsTable.removeAll()
-        let startTime = CFAbsoluteTimeGetCurrent()
-        let (rootState, summaries) = self.chatListIndexTable.debugReindexUnreadCounts(postbox: self)
+        let _ = CFAbsoluteTimeGetCurrent()
+        let (totalStates, summaries) = self.chatListIndexTable.debugReindexUnreadCounts(postbox: self)
         
-        self.messageHistoryMetadataTable.setChatListTotalUnreadState(rootState)
-        self.currentUpdatedTotalUnreadState = rootState
+        self.messageHistoryMetadataTable.removeAllTotalUnreadStates()
+        for (groupId, state) in totalStates {
+            self.messageHistoryMetadataTable.setTotalUnreadState(groupId: groupId, state: state)
+        }
+        self.currentUpdatedTotalUnreadStates = totalStates
+        
         for (groupId, summary) in summaries {
             self.groupMessageStatsTable.set(groupId: groupId, summary: summary)
             self.currentUpdatedGroupTotalUnreadSummaries[groupId] = summary

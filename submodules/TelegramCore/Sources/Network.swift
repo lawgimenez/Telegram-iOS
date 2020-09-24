@@ -1,9 +1,9 @@
 import Foundation
-
 import Postbox
 import TelegramApi
 import SwiftSignalKit
 import MtProtoKit
+import NetworkLogging
 
 #if os(iOS)
     import CloudData
@@ -323,11 +323,11 @@ func networkUsageStats(basePath: String, reset: ResetNetworkUsageStats) -> Signa
         var resetAddKeys: [NSNumber: NSNumber] = [:]
         let timestamp = Int32(CFAbsoluteTimeGetCurrent() + NSTimeIntervalSince1970)
         if reset.contains(.wifi) {
-            resetKeys = rawKeys.filter({ $0.connection == .wifi }).map({ $0.key as NSNumber })
+            resetKeys += rawKeys.filter({ $0.connection == .wifi }).map({ $0.key as NSNumber })
             resetAddKeys[UsageCalculationResetKey.wifi.rawValue as NSNumber] = Int64(timestamp) as NSNumber
         }
         if reset.contains(.cellular) {
-            resetKeys = rawKeys.filter({ $0.connection == .cellular }).map({ $0.key as NSNumber })
+            resetKeys += rawKeys.filter({ $0.connection == .cellular }).map({ $0.key as NSNumber })
             resetAddKeys[UsageCalculationResetKey.cellular.rawValue as NSNumber] = Int64(timestamp) as NSNumber
         }
         if !resetKeys.isEmpty {
@@ -403,16 +403,18 @@ public struct NetworkInitializationArguments {
     public let languagesCategory: String
     public let appVersion: String
     public let voipMaxLayer: Int32
+    public let voipVersions: [CallSessionManagerImplementationVersion]
     public let appData: Signal<Data?, NoError>
     public let autolockDeadine: Signal<Int32?, NoError>
     public let encryptionProvider: EncryptionProvider
     
-    public init(apiId: Int32, apiHash: String, languagesCategory: String, appVersion: String, voipMaxLayer: Int32, appData: Signal<Data?, NoError>, autolockDeadine: Signal<Int32?, NoError>, encryptionProvider: EncryptionProvider) {
+    public init(apiId: Int32, apiHash: String, languagesCategory: String, appVersion: String, voipMaxLayer: Int32, voipVersions: [CallSessionManagerImplementationVersion], appData: Signal<Data?, NoError>, autolockDeadine: Signal<Int32?, NoError>, encryptionProvider: EncryptionProvider) {
         self.apiId = apiId
         self.apiHash = apiHash
         self.languagesCategory = languagesCategory
         self.appVersion = appVersion
         self.voipMaxLayer = voipMaxLayer
+        self.voipVersions = voipVersions
         self.appData = appData
         self.autolockDeadine = autolockDeadine
         self.encryptionProvider = encryptionProvider
@@ -474,7 +476,7 @@ func initializedNetwork(arguments: NetworkInitializationArguments, supplementary
             } else {
                 seedAddressList = [
                     1: ["149.154.175.50", "2001:b28:f23d:f001::a"],
-                    2: ["149.154.167.50", "2001:67c:4e8:f002::a"],
+                    2: ["149.154.167.50", "95.161.76.100", "2001:67c:4e8:f002::a"],
                     3: ["149.154.175.100", "2001:b28:f23d:f003::a"],
                     4: ["149.154.167.91", "2001:67c:4e8:f004::a"],
                     5: ["149.154.171.5", "2001:b28:f23f:f005::a"]

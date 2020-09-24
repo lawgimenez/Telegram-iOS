@@ -5,11 +5,7 @@ import SwiftSignalKit
 import Postbox
 import TelegramCore
 import SyncCore
-#if BUCK
 import MtProtoKit
-#else
-import MtProtoKitDynamic
-#endif
 import MessageUI
 import TelegramPresentationData
 import TelegramUIPreferences
@@ -46,6 +42,8 @@ private enum DebugControllerSection: Int32 {
     case logs
     case logging
     case experiments
+    case videoExperiments
+    case videoExperiments2
     case info
 }
 
@@ -72,6 +70,12 @@ private enum DebugControllerEntry: ItemListNodeEntry {
     case optimizeDatabase(PresentationTheme)
     case photoPreview(PresentationTheme, Bool)
     case knockoutWallpaper(PresentationTheme, Bool)
+    case alternativeFolderTabs(Bool)
+    case playerEmbedding(Bool)
+    case playlistPlayback(Bool)
+    case preferredVideoCodec(Int, String, String?, Bool)
+    case disableVideoAspectScaling(Bool)
+    case enableVoipTcp(Bool)
     case hostInfo(PresentationTheme, String)
     case versionInfo(PresentationTheme)
     
@@ -85,14 +89,18 @@ private enum DebugControllerEntry: ItemListNodeEntry {
             return DebugControllerSection.logging.rawValue
         case .enableRaiseToSpeak, .keepChatNavigationStack, .skipReadHistory, .crashOnSlowQueries:
             return DebugControllerSection.experiments.rawValue
-        case .clearTips, .reimport, .resetData, .resetDatabase, .resetHoles, .reindexUnread, .resetBiometricsData, .optimizeDatabase, .photoPreview, .knockoutWallpaper:
+        case .clearTips, .reimport, .resetData, .resetDatabase, .resetHoles, .reindexUnread, .resetBiometricsData, .optimizeDatabase, .photoPreview, .knockoutWallpaper, .alternativeFolderTabs, .playerEmbedding, .playlistPlayback:
             return DebugControllerSection.experiments.rawValue
+        case .preferredVideoCodec:
+            return DebugControllerSection.videoExperiments.rawValue
+        case .disableVideoAspectScaling, .enableVoipTcp:
+            return DebugControllerSection.videoExperiments2.rawValue
         case .hostInfo, .versionInfo:
             return DebugControllerSection.info.rawValue
         }
     }
     
-    var stableId: Int32 {
+    var stableId: Int {
         switch self {
         case .sendLogs:
             return 0
@@ -138,10 +146,22 @@ private enum DebugControllerEntry: ItemListNodeEntry {
             return 21
         case .knockoutWallpaper:
             return 22
-        case .hostInfo:
+        case .alternativeFolderTabs:
+            return 23
+        case .playerEmbedding:
             return 24
-        case .versionInfo:
+        case .playlistPlayback:
             return 25
+        case let .preferredVideoCodec(index, _, _, _):
+            return 26 + index
+        case .disableVideoAspectScaling:
+            return 100
+        case .enableVoipTcp:
+            return 101
+        case .hostInfo:
+            return 102
+        case .versionInfo:
+            return 103
         }
     }
     
@@ -172,7 +192,7 @@ private enum DebugControllerEntry: ItemListNodeEntry {
                                     
                                     let messages = logs.map { (name, path) -> EnqueueMessage in
                                         let id = arc4random64()
-                                        let file = TelegramMediaFile(fileId: MediaId(namespace: Namespaces.Media.LocalFile, id: id), partialReference: nil, resource: LocalFileReferenceMediaResource(localFilePath: path, randomId: id), previewRepresentations: [], immediateThumbnailData: nil, mimeType: "application/text", size: nil, attributes: [.FileName(fileName: name)])
+                                        let file = TelegramMediaFile(fileId: MediaId(namespace: Namespaces.Media.LocalFile, id: id), partialReference: nil, resource: LocalFileReferenceMediaResource(localFilePath: path, randomId: id), previewRepresentations: [], videoThumbnails: [], immediateThumbnailData: nil, mimeType: "application/text", size: nil, attributes: [.FileName(fileName: name)])
                                         return .message(text: "", attributes: [], mediaReference: .standalone(media: file), replyToMessageId: nil, localGroupingKey: nil)
                                     }
                                     let _ = enqueueMessages(account: context.account, peerId: peerId, messages: messages).start()
@@ -225,7 +245,7 @@ private enum DebugControllerEntry: ItemListNodeEntry {
                                         
                                         let messages = updatedLogs.map { (name, path) -> EnqueueMessage in
                                             let id = arc4random64()
-                                            let file = TelegramMediaFile(fileId: MediaId(namespace: Namespaces.Media.LocalFile, id: id), partialReference: nil, resource: LocalFileReferenceMediaResource(localFilePath: path, randomId: id), previewRepresentations: [], immediateThumbnailData: nil, mimeType: "application/text", size: nil, attributes: [.FileName(fileName: name)])
+                                            let file = TelegramMediaFile(fileId: MediaId(namespace: Namespaces.Media.LocalFile, id: id), partialReference: nil, resource: LocalFileReferenceMediaResource(localFilePath: path, randomId: id), previewRepresentations: [], videoThumbnails: [], immediateThumbnailData: nil, mimeType: "application/text", size: nil, attributes: [.FileName(fileName: name)])
                                             return .message(text: "", attributes: [], mediaReference: .standalone(media: file), replyToMessageId: nil, localGroupingKey: nil)
                                         }
                                         let _ = enqueueMessages(account: context.account, peerId: peerId, messages: messages).start()
@@ -272,7 +292,7 @@ private enum DebugControllerEntry: ItemListNodeEntry {
                                 
                                 let messages = logs.map { (name, path) -> EnqueueMessage in
                                     let id = arc4random64()
-                                    let file = TelegramMediaFile(fileId: MediaId(namespace: Namespaces.Media.LocalFile, id: id), partialReference: nil, resource: LocalFileReferenceMediaResource(localFilePath: path, randomId: id), previewRepresentations: [], immediateThumbnailData: nil, mimeType: "application/text", size: nil, attributes: [.FileName(fileName: name)])
+                                    let file = TelegramMediaFile(fileId: MediaId(namespace: Namespaces.Media.LocalFile, id: id), partialReference: nil, resource: LocalFileReferenceMediaResource(localFilePath: path, randomId: id), previewRepresentations: [], videoThumbnails: [], immediateThumbnailData: nil, mimeType: "application/text", size: nil, attributes: [.FileName(fileName: name)])
                                     return .message(text: "", attributes: [], mediaReference: .standalone(media: file), replyToMessageId: nil, localGroupingKey: nil)
                                 }
                                 let _ = enqueueMessages(account: context.account, peerId: peerId, messages: messages).start()
@@ -301,7 +321,7 @@ private enum DebugControllerEntry: ItemListNodeEntry {
                                         
                                         let messages = logs.map { (name, path) -> EnqueueMessage in
                                             let id = arc4random64()
-                                            let file = TelegramMediaFile(fileId: MediaId(namespace: Namespaces.Media.LocalFile, id: id), partialReference: nil, resource: LocalFileReferenceMediaResource(localFilePath: path, randomId: id), previewRepresentations: [], immediateThumbnailData: nil, mimeType: "application/text", size: nil, attributes: [.FileName(fileName: name)])
+                                            let file = TelegramMediaFile(fileId: MediaId(namespace: Namespaces.Media.LocalFile, id: id), partialReference: nil, resource: LocalFileReferenceMediaResource(localFilePath: path, randomId: id), previewRepresentations: [], videoThumbnails: [], immediateThumbnailData: nil, mimeType: "application/text", size: nil, attributes: [.FileName(fileName: name)])
                                             return .message(text: "", attributes: [], mediaReference: .standalone(media: file), replyToMessageId: nil, localGroupingKey: nil)
                                         }
                                         let _ = enqueueMessages(account: context.account, peerId: peerId, messages: messages).start()
@@ -395,6 +415,9 @@ private enum DebugControllerEntry: ItemListNodeEntry {
                 if let context = arguments.context {
                     let _ = (context.account.postbox.transaction { transaction -> Void in
                         transaction.clearItemCacheCollection(collectionId: Namespaces.CachedItemCollection.cachedPollResults)
+                        unmarkChatListFeaturedFiltersAsSeen(transaction: transaction)
+                        
+                        transaction.clearItemCacheCollection(collectionId: Namespaces.CachedItemCollection.cachedStickerPacks)
                     }).start()
                 }
             })
@@ -451,7 +474,7 @@ private enum DebugControllerEntry: ItemListNodeEntry {
                         ActionSheetButtonItem(title: presentationData.strings.Common_Cancel, color: .accent, font: .bold, action: { [weak actionSheet] in
                             actionSheet?.dismissAnimated()
                         })
-                        ])])
+                    ])])
                 arguments.presentController(actionSheet, nil)
             })
         case let .resetHoles(theme):
@@ -507,7 +530,7 @@ private enum DebugControllerEntry: ItemListNodeEntry {
                     })
             })
         case let .photoPreview(theme, value):
-            return ItemListSwitchItem(presentationData: presentationData, title: "Photo Preview", value: value, sectionId: self.section, style: .blocks, updated: { value in
+            return ItemListSwitchItem(presentationData: presentationData, title: "Media Preview (Updated)", value: value, sectionId: self.section, style: .blocks, updated: { value in
                 let _ = arguments.sharedContext.accountManager.transaction ({ transaction in
                     transaction.updateSharedData(ApplicationSpecificSharedDataKeys.experimentalUISettings, { settings in
                         var settings = settings as? ExperimentalUISettings ?? ExperimentalUISettings.defaultSettings
@@ -522,6 +545,66 @@ private enum DebugControllerEntry: ItemListNodeEntry {
                     transaction.updateSharedData(ApplicationSpecificSharedDataKeys.experimentalUISettings, { settings in
                         var settings = settings as? ExperimentalUISettings ?? ExperimentalUISettings.defaultSettings
                         settings.knockoutWallpaper = value
+                        return settings
+                    })
+                }).start()
+            })
+        case let .alternativeFolderTabs(value):
+            return ItemListSwitchItem(presentationData: presentationData, title: "Alternative Tabs", value: value, sectionId: self.section, style: .blocks, updated: { value in
+                let _ = arguments.sharedContext.accountManager.transaction ({ transaction in
+                    transaction.updateSharedData(ApplicationSpecificSharedDataKeys.experimentalUISettings, { settings in
+                        var settings = settings as? ExperimentalUISettings ?? ExperimentalUISettings.defaultSettings
+                        settings.foldersTabAtBottom = value
+                        return settings
+                    })
+                }).start()
+            })
+        case let .playerEmbedding(value):
+            return ItemListSwitchItem(presentationData: presentationData, title: "Player Embedding", value: value, sectionId: self.section, style: .blocks, updated: { value in
+                let _ = arguments.sharedContext.accountManager.transaction ({ transaction in
+                    transaction.updateSharedData(ApplicationSpecificSharedDataKeys.experimentalUISettings, { settings in
+                        var settings = settings as? ExperimentalUISettings ?? ExperimentalUISettings.defaultSettings
+                        settings.playerEmbedding = value
+                        return settings
+                    })
+                }).start()
+            })
+        case let .playlistPlayback(value):
+            return ItemListSwitchItem(presentationData: presentationData, title: "Playlist Playback", value: value, sectionId: self.section, style: .blocks, updated: { value in
+                let _ = arguments.sharedContext.accountManager.transaction ({ transaction in
+                    transaction.updateSharedData(ApplicationSpecificSharedDataKeys.experimentalUISettings, { settings in
+                        var settings = settings as? ExperimentalUISettings ?? ExperimentalUISettings.defaultSettings
+                        settings.playlistPlayback = value
+                        return settings
+                    })
+                }).start()
+            })
+        case let .preferredVideoCodec(_, title, value, isSelected):
+            return ItemListCheckboxItem(presentationData: presentationData, title: title, style: .right, checked: isSelected, zeroSeparatorInsets: false, sectionId: self.section, action: {
+                let _ = arguments.sharedContext.accountManager.transaction ({ transaction in
+                    transaction.updateSharedData(ApplicationSpecificSharedDataKeys.experimentalUISettings, { settings in
+                        var settings = settings as? ExperimentalUISettings ?? ExperimentalUISettings.defaultSettings
+                        settings.preferredVideoCodec = value
+                        return settings
+                    })
+                }).start()
+            })
+        case let .disableVideoAspectScaling(value):
+            return ItemListSwitchItem(presentationData: presentationData, title: "Video Cropping Optimization", value: !value, sectionId: self.section, style: .blocks, updated: { value in
+                let _ = arguments.sharedContext.accountManager.transaction ({ transaction in
+                    transaction.updateSharedData(ApplicationSpecificSharedDataKeys.experimentalUISettings, { settings in
+                        var settings = settings as? ExperimentalUISettings ?? ExperimentalUISettings.defaultSettings
+                        settings.disableVideoAspectScaling = !value
+                        return settings
+                    })
+                }).start()
+            })
+        case let .enableVoipTcp(value):
+            return ItemListSwitchItem(presentationData: presentationData, title: "Enable VoIP TCP", value: !value, sectionId: self.section, style: .blocks, updated: { value in
+                let _ = arguments.sharedContext.accountManager.transaction ({ transaction in
+                    transaction.updateSharedData(ApplicationSpecificSharedDataKeys.experimentalUISettings, { settings in
+                        var settings = settings as? ExperimentalUISettings ?? ExperimentalUISettings.defaultSettings
+                        settings.enableVoipTcp = value
                         return settings
                     })
                 }).start()
@@ -566,8 +649,26 @@ private func debugControllerEntries(presentationData: PresentationData, loggingS
     entries.append(.resetHoles(presentationData.theme))
     entries.append(.reindexUnread(presentationData.theme))
     entries.append(.optimizeDatabase(presentationData.theme))
-    entries.append(.photoPreview(presentationData.theme, experimentalSettings.chatListPhotos))
+    //entries.append(.photoPreview(presentationData.theme, experimentalSettings.chatListPhotos))
     entries.append(.knockoutWallpaper(presentationData.theme, experimentalSettings.knockoutWallpaper))
+    entries.append(.alternativeFolderTabs(experimentalSettings.foldersTabAtBottom))
+    entries.append(.playerEmbedding(experimentalSettings.playerEmbedding))
+    entries.append(.playlistPlayback(experimentalSettings.playlistPlayback))
+    
+    let codecs: [(String, String?)] = [
+        ("No Preference", nil),
+        ("H265", "H265"),
+        ("H264", "H264"),
+        ("VP8", "VP8"),
+        ("VP9", "VP9")
+    ]
+    
+    for i in 0 ..< codecs.count {
+        entries.append(.preferredVideoCodec(i, codecs[i].0, codecs[i].1, experimentalSettings.preferredVideoCodec == codecs[i].1))
+    }
+    
+    entries.append(.disableVideoAspectScaling(experimentalSettings.disableVideoAspectScaling))
+    entries.append(.enableVoipTcp(experimentalSettings.enableVoipTcp))
 
     if let backupHostOverride = networkSettings?.backupHostOverride {
         entries.append(.hostInfo(presentationData.theme, "Host: \(backupHostOverride)"))

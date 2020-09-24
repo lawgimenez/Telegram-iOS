@@ -3,6 +3,7 @@ PROGRAM{
   DECLPROC recv_internal
   DECLPROC recv_external
   85143 DECLMETHOD seqno
+  78748 DECLMETHOD get_public_key
   recv_internal PROC:<{
     //  in_msg
     DROP	// 
@@ -15,8 +16,8 @@ PROGRAM{
     32 LDU	//  signature in_msg _9 cs
     32 LDU	//  signature in_msg _9 _12 cs
     32 LDU	//  signature in_msg subwallet_id valid_until msg_seqno cs
-    NOW	//  signature in_msg subwallet_id valid_until msg_seqno cs _19
-    s1 s3 XCHG	//  signature in_msg subwallet_id cs msg_seqno valid_until _19
+    s0 s2 XCHG
+    NOW	//  signature in_msg subwallet_id cs msg_seqno valid_until _19
     LEQ	//  signature in_msg subwallet_id cs msg_seqno _20
     35 THROWIF
     c4 PUSH	//  signature in_msg subwallet_id cs msg_seqno _23
@@ -61,5 +62,13 @@ PROGRAM{
     c4 PUSH	//  _0
     CTOS	//  _1
     32 PLDU	//  _3
+  }>
+  get_public_key PROC:<{
+    // 
+    c4 PUSH	//  _1
+    CTOS	//  cs
+    64 LDU	//  _9 _8
+    NIP	//  cs
+    256 PLDU	//  _7
   }>
 }END>c

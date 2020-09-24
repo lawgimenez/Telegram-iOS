@@ -104,6 +104,7 @@ if (TON_USE_ROCKSDB)
   if (ANDROID) 
     set(PORTABLE ON CACHE BOOL "portable")
   endif()
+  set(WITH_GFLAGS OFF CACHE BOOL "build with GFlags")
   set(WITH_TESTS OFF CACHE BOOL "build with tests")
   set(WITH_TOOLS OFF CACHE BOOL "build with tools")
   set(FAIL_ON_WARNINGS OFF CACHE BOOL "fail on warnings")
@@ -220,7 +221,7 @@ elseif (CLANG OR GCC)
   if (APPLE)
     #use "-Wl,-exported_symbols_list,${CMAKE_CURRENT_SOURCE_DIR}/export_list" for exported symbols
     set(CMAKE_SHARED_LINKER_FLAGS "${CMAKE_SHARED_LINKER_FLAGS} -fvisibility=hidden -Wl,-dead_strip,-x,-S")
-    set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -fvisibility=hidden -Wl,-dead_strip,-x,-S")
+    #set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -fvisibility=hidden -Wl,-dead_strip,-x,-S")
   else()
     set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -ffunction-sections -fdata-sections")
     set(CMAKE_SHARED_LINKER_FLAGS "${CMAKE_SHARED_LINKER_FLAGS} -Wl,--gc-sections -Wl,--exclude-libs,ALL")
@@ -243,6 +244,14 @@ endif()
 if (NOT ANDROID) # _FILE_OFFSET_BITS is broken in ndk r15 and r15b and doesn't work prior to Android 7.0
   add_definitions(-D_FILE_OFFSET_BITS=64)
 endif()
+
+set(INTERNAL_COMPILE "0")
+
+set(TONLIB_COMPILE "0")
+#BEGIN tonlib
+  add_definitions(-D_TONLIB_COMPILE=1)
+  set(TONLIB_COMPILE "1")
+#END tonlib
 
 include(AddCXXCompilerFlag)
 if (MSVC)

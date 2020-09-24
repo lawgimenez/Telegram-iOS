@@ -156,7 +156,11 @@ public struct MessageIndex: Comparable, Hashable {
             return lhs.id.namespace < rhs.id.namespace
         }
         
-        return lhs.id.id < rhs.id.id
+        if lhs.id.id != rhs.id.id {
+            return lhs.id.id < rhs.id.id
+        }
+        
+        return lhs.id.peerId.toInt64() < rhs.id.peerId.toInt64()
     }
 }
 
@@ -184,16 +188,16 @@ public struct ChatListIndex: Comparable, Hashable {
         return lhs.messageIndex < rhs.messageIndex
     }
     
-    public var hashValue: Int {
-        return self.messageIndex.hashValue
-    }
-    
     public static var absoluteUpperBound: ChatListIndex {
         return ChatListIndex(pinningIndex: 0, messageIndex: MessageIndex.absoluteUpperBound())
     }
     
     public static var absoluteLowerBound: ChatListIndex {
         return ChatListIndex(pinningIndex: nil, messageIndex: MessageIndex.absoluteLowerBound())
+    }
+    
+    public static var pinnedLowerBound: ChatListIndex {
+        return ChatListIndex(pinningIndex: UInt16(Int8.max - 1), messageIndex: MessageIndex.absoluteLowerBound())
     }
     
     public var predecessor: ChatListIndex {
@@ -400,17 +404,19 @@ public struct StoreMessageForwardInfo {
     public let sourceMessageId: MessageId?
     public let date: Int32
     public let authorSignature: String?
+    public let psaType: String?
     
-    public init(authorId: PeerId?, sourceId: PeerId?, sourceMessageId: MessageId?, date: Int32, authorSignature: String?) {
+    public init(authorId: PeerId?, sourceId: PeerId?, sourceMessageId: MessageId?, date: Int32, authorSignature: String?, psaType: String?) {
         self.authorId = authorId
         self.sourceId = sourceId
         self.sourceMessageId = sourceMessageId
         self.date = date
         self.authorSignature = authorSignature
+        self.psaType = psaType
     }
     
     public init(_ info: MessageForwardInfo) {
-        self.init(authorId: info.author?.id, sourceId: info.source?.id, sourceMessageId: info.sourceMessageId, date: info.date, authorSignature: info.authorSignature)
+        self.init(authorId: info.author?.id, sourceId: info.source?.id, sourceMessageId: info.sourceMessageId, date: info.date, authorSignature: info.authorSignature, psaType: info.psaType)
     }
 }
 
@@ -420,13 +426,15 @@ public struct MessageForwardInfo: Equatable {
     public let sourceMessageId: MessageId?
     public let date: Int32
     public let authorSignature: String?
+    public let psaType: String?
     
-    public init(author: Peer?, source: Peer?, sourceMessageId: MessageId?, date: Int32, authorSignature: String?) {
+    public init(author: Peer?, source: Peer?, sourceMessageId: MessageId?, date: Int32, authorSignature: String?, psaType: String?) {
         self.author = author
         self.source = source
         self.sourceMessageId = sourceMessageId
         self.date = date
         self.authorSignature = authorSignature
+        self.psaType = psaType
     }
 
     public static func ==(lhs: MessageForwardInfo, rhs: MessageForwardInfo) -> Bool {
@@ -447,6 +455,9 @@ public struct MessageForwardInfo: Equatable {
             return false
         }
         if lhs.authorSignature != rhs.authorSignature {
+            return false
+        }
+        if lhs.psaType != rhs.psaType {
             return false
         }
         

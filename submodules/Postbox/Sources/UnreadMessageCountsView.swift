@@ -2,16 +2,19 @@ import Foundation
 
 public enum UnreadMessageCountsItem: Equatable {
     case total(ValueBoxKey?)
+    case totalInGroup(PeerGroupId)
     case peer(PeerId)
 }
 
 private enum MutableUnreadMessageCountsItemEntry {
     case total((ValueBoxKey, PreferencesEntry?)?, ChatListTotalUnreadState)
+    case totalInGroup(PeerGroupId, ChatListTotalUnreadState)
     case peer(PeerId, CombinedPeerReadState?)
 }
 
 public enum UnreadMessageCountsItemEntry {
     case total(PreferencesEntry?, ChatListTotalUnreadState)
+    case totalInGroup(PeerGroupId, ChatListTotalUnreadState)
     case peer(PeerId, CombinedPeerReadState?)
 }
 
@@ -22,7 +25,9 @@ final class MutableUnreadMessageCountsView: MutablePostboxView {
         self.entries = items.map { item in
             switch item {
             case let .total(preferencesKey):
-                return .total(preferencesKey.flatMap({ ($0, postbox.preferencesTable.get(key: $0)) }), postbox.messageHistoryMetadataTable.getChatListTotalUnreadState())
+                return .total(preferencesKey.flatMap({ ($0, postbox.preferencesTable.get(key: $0)) }), postbox.messageHistoryMetadataTable.getTotalUnreadState(groupId: .root))
+            case let .totalInGroup(groupId):
+                return .totalInGroup(groupId, postbox.messageHistoryMetadataTable.getTotalUnreadState(groupId: groupId))
             case let .peer(peerId):
                 return .peer(peerId, postbox.readStateTable.getCombinedState(peerId))
             }
@@ -47,13 +52,20 @@ final class MutableUnreadMessageCountsView: MutablePostboxView {
             }
         }
         
-        if transaction.currentUpdatedTotalUnreadState != nil || !transaction.alteredInitialPeerCombinedReadStates.isEmpty || updatedPreferencesEntry != nil {
+        if !transaction.currentUpdatedTotalUnreadStates.isEmpty || !transaction.alteredInitialPeerCombinedReadStates.isEmpty || updatedPreferencesEntry != nil {
             for i in 0 ..< self.entries.count {
                 switch self.entries[i] {
                 case let .total(keyAndEntry, state):
-                    if let updatedState = transaction.currentUpdatedTotalUnreadState {
+                    if let updatedState = transaction.currentUpdatedTotalUnreadStates[.root] {
                         if updatedState != state {
                             self.entries[i] = .total(keyAndEntry.flatMap({ ($0.0, updatedPreferencesEntry ?? $0.1) }), updatedState)
+                            updated = true
+                        }
+                    }
+                case let .totalInGroup(groupId, state):
+                    if let updatedState = transaction.currentUpdatedTotalUnreadStates[groupId] {
+                        if updatedState != state {
+                            self.entries[i] = .totalInGroup(groupId, updatedState)
                             updated = true
                         }
                     }
@@ -82,6 +94,8 @@ public final class UnreadMessageCountsView: PostboxView {
             switch entry {
             case let .total(keyAndValue, state):
                 return .total(keyAndValue?.1, state)
+            case let .totalInGroup(groupId, state):
+                return .totalInGroup(groupId, state)
             case let .peer(peerId, count):
                 return .peer(peerId, count)
             }
@@ -103,7 +117,7 @@ public final class UnreadMessageCountsView: PostboxView {
     public func count(for item: UnreadMessageCountsItem) -> Int32? {
         for entry in self.entries {
             switch entry {
-            case .total:
+            case .total, .totalInGroup:
                 break
             case let .peer(peerId, state):
                 if case .peer(peerId) = item {

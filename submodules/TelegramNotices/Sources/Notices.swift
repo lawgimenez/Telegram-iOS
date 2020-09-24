@@ -135,6 +135,7 @@ private enum ApplicationSpecificGlobalNotice: Int32 {
     case chatTextSelectionTip = 16
     case themeChangeTip = 17
     case callsTabTip = 18
+    case chatFolderTips = 19
     
     var key: ValueBoxKey {
         let v = ValueBoxKey(length: 4)
@@ -163,7 +164,8 @@ private struct ApplicationSpecificNoticeKeys {
     private static let globalNamespace: Int32 = 2
     private static let permissionsNamespace: Int32 = 3
     private static let peerReportNamespace: Int32 = 4
-    private static let inlineBotLocationRequestNamespace: Int32 = 1
+    private static let inlineBotLocationRequestNamespace: Int32 = 5
+    private static let psaAcknowledgementNamespace: Int32 = 6
     
     static func inlineBotLocationRequestNotice(peerId: PeerId) -> NoticeEntryKey {
         return NoticeEntryKey(namespace: noticeNamespace(namespace: inlineBotLocationRequestNamespace), key: noticeKey(peerId: peerId, key: 0))
@@ -197,12 +199,20 @@ private struct ApplicationSpecificNoticeKeys {
         return NoticeEntryKey(namespace: noticeNamespace(namespace: globalNamespace), key: ApplicationSpecificGlobalNotice.archiveChatTips.key)
     }
     
+    static func chatFolderTips() -> NoticeEntryKey {
+        return NoticeEntryKey(namespace: noticeNamespace(namespace: globalNamespace), key: ApplicationSpecificGlobalNotice.chatFolderTips.key)
+    }
+    
     static func profileCallTips() -> NoticeEntryKey {
         return NoticeEntryKey(namespace: noticeNamespace(namespace: globalNamespace), key: ApplicationSpecificGlobalNotice.profileCallTips.key)
     }
     
     static func proxyAdsAcknowledgment() -> NoticeEntryKey {
         return NoticeEntryKey(namespace: noticeNamespace(namespace: globalNamespace), key: ApplicationSpecificGlobalNotice.proxyAdsAcknowledgment.key)
+    }
+    
+    static func psaAdsAcknowledgment(peerId: PeerId) -> NoticeEntryKey {
+        return NoticeEntryKey(namespace: noticeNamespace(namespace: psaAcknowledgementNamespace), key: noticeKey(peerId: peerId, key: 0))
     }
     
     static func setPublicChannelLink() -> NoticeEntryKey {
@@ -392,6 +402,21 @@ public struct ApplicationSpecificNotice {
         }
     }
     
+    public static func incrementChatFolderTips(accountManager: AccountManager, count: Int = 1) -> Signal<Int, NoError> {
+        return accountManager.transaction { transaction -> Int in
+            var currentValue: Int32 = 0
+            if let value = transaction.getNotice(ApplicationSpecificNoticeKeys.chatFolderTips()) as? ApplicationSpecificCounterNotice {
+                currentValue = value.value
+            }
+            let previousValue = currentValue
+            currentValue += Int32(count)
+            
+            transaction.setNotice(ApplicationSpecificNoticeKeys.chatFolderTips(), ApplicationSpecificCounterNotice(value: currentValue))
+            
+            return Int(previousValue)
+        }
+    }
+    
     public static func setArchiveIntroDismissed(transaction: AccountManagerModifier, value: Bool) {
         transaction.setNotice(ApplicationSpecificNoticeKeys.archiveIntroDismissed(), ApplicationSpecificVariantNotice(value: value))
     }
@@ -451,6 +476,22 @@ public struct ApplicationSpecificNotice {
     public static func setProxyAdsAcknowledgment(accountManager: AccountManager) -> Signal<Void, NoError> {
         return accountManager.transaction { transaction -> Void in
             transaction.setNotice(ApplicationSpecificNoticeKeys.proxyAdsAcknowledgment(), ApplicationSpecificBoolNotice())
+        }
+    }
+    
+    public static func getPsaAcknowledgment(accountManager: AccountManager, peerId: PeerId) -> Signal<Bool, NoError> {
+        return accountManager.transaction { transaction -> Bool in
+            if let _ = transaction.getNotice(ApplicationSpecificNoticeKeys.psaAdsAcknowledgment(peerId: peerId)) as? ApplicationSpecificBoolNotice {
+                return true
+            } else {
+                return false
+            }
+        }
+    }
+    
+    public static func setPsaAcknowledgment(accountManager: AccountManager, peerId: PeerId) -> Signal<Void, NoError> {
+        return accountManager.transaction { transaction -> Void in
+            transaction.setNotice(ApplicationSpecificNoticeKeys.psaAdsAcknowledgment(peerId: peerId), ApplicationSpecificBoolNotice())
         }
     }
     

@@ -91,6 +91,7 @@ open class ItemListRevealOptionsItemNode: ListViewItemNode, UIGestureRecognizerD
         
         let recognizer = ItemListRevealOptionsGestureRecognizer(target: self, action: #selector(self.revealGesture(_:)))
         self.recognizer = recognizer
+        recognizer.delegate = self
         recognizer.allowAnyDirection = self.allowAnyDirection
         self.view.addGestureRecognizer(recognizer)
         
@@ -100,6 +101,16 @@ open class ItemListRevealOptionsItemNode: ListViewItemNode, UIGestureRecognizerD
         self.view.addGestureRecognizer(tapRecognizer)
         
         self.view.disablesInteractiveTransitionGestureRecognizer = self.allowAnyDirection
+        
+        self.view.disablesInteractiveTransitionGestureRecognizerNow = { [weak self] in
+            guard let strongSelf = self else {
+                return false
+            }
+            if !strongSelf.revealOffset.isZero {
+                return true
+            }
+            return false
+        }
     }
     
     open func setRevealOptions(_ options: (left: [ItemListRevealOption], right: [ItemListRevealOption])) {
@@ -161,6 +172,13 @@ open class ItemListRevealOptionsItemNode: ListViewItemNode, UIGestureRecognizerD
         } else {
             return false
         }
+    }
+    
+    open func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldBeRequiredToFailBy otherGestureRecognizer: UIGestureRecognizer) -> Bool {
+        /*if gestureRecognizer === self.recognizer && otherGestureRecognizer is InteractiveTransitionGestureRecognizer {
+            return true
+        }*/
+        return false
     }
     
     @objc private func revealTapGesture(_ recognizer: UITapGestureRecognizer) {

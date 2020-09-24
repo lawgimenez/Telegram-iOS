@@ -4,17 +4,10 @@ static_library(
     name = "TelegramCallsUI",
     srcs = glob([
         "Sources/**/*.swift",
-        "Sources/**/*.m",
     ]),
-    headers = glob([
-        "Sources/**/*.h",
-    ], exclude = ["Sources/TelegramCallsUI.h"]),
-    exported_headers = glob([
-        "Sources/**/*.h",
-    ], exclude = ["Sources/TelegramCallsUI.h"]),
     deps = [
         "//submodules/SSignalKit/SwiftSignalKit:SwiftSignalKit#shared",
-	    "//submodules/Display:Display#shared",
+        "//submodules/Display:Display#shared",
         "//submodules/TelegramPresentationData:TelegramPresentationData",
     	"//submodules/TelegramUIPreferences:TelegramUIPreferences",
         "//submodules/PhotoResources:PhotoResources",
@@ -27,6 +20,9 @@ static_library(
         "//submodules/OverlayStatusController:OverlayStatusController",
         "//submodules/AppBundle:AppBundle",
         "//submodules/PresentationDataUtils:PresentationDataUtils",
+        "//submodules/TelegramCallsUI/CallsEmoji:CallsEmoji",
+        "//submodules/SemanticStatusNode:SemanticStatusNode",
+        "//submodules/TooltipUI:TooltipUI",
     ],
     frameworks = [
         "$SDKROOT/System/Library/Frameworks/Foundation.framework",

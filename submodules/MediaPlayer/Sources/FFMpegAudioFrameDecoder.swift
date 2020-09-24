@@ -1,6 +1,6 @@
 import Foundation
 import CoreMedia
-import FFMpeg
+import FFMpegBinding
 
 final class FFMpegAudioFrameDecoder: MediaTrackFrameDecoder {
     private let codecContext: FFMpegAVCodecContext
@@ -21,9 +21,14 @@ final class FFMpegAudioFrameDecoder: MediaTrackFrameDecoder {
     func decode(frame: MediaTrackDecodableFrame) -> MediaTrackFrame? {
         let status = frame.packet.send(toDecoder: self.codecContext)
         if status == 0 {
-            while self.codecContext.receive(into: self.audioFrame) {
-                if let convertedFrame = convertAudioFrame(self.audioFrame, pts: frame.pts, duration: frame.duration) {
-                    self.delayedFrames.append(convertedFrame)
+            while true {
+                let result = self.codecContext.receive(into: self.audioFrame)
+                if case .success = result {
+                    if let convertedFrame = convertAudioFrame(self.audioFrame, pts: frame.pts, duration: frame.duration) {
+                        self.delayedFrames.append(convertedFrame)
+                    }
+                } else {
+                    break
                 }
             }
             

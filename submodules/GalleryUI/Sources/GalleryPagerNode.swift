@@ -5,7 +5,9 @@ import Display
 import SwiftSignalKit
 import Postbox
 
-private let edgeWidth: CGFloat = 44.0
+private func edgeWidth(width: CGFloat) -> CGFloat {
+    return min(44.0, floor(width / 6.0))
+}
 
 private let leftFadeImage = generateImage(CGSize(width: 64.0, height: 1.0), opaque: false, rotatedContext: { size, context in
     let bounds = CGRect(origin: CGPoint(), size: size)
@@ -62,12 +64,14 @@ public struct GalleryPagerTransaction {
     public let insertItems: [GalleryPagerInsertItem]
     public let updateItems: [GalleryPagerUpdateItem]
     public let focusOnItem: Int?
+    public let synchronous: Bool
     
-    public init(deleteItems: [Int], insertItems: [GalleryPagerInsertItem], updateItems: [GalleryPagerUpdateItem], focusOnItem: Int?) {
+    public init(deleteItems: [Int], insertItems: [GalleryPagerInsertItem], updateItems: [GalleryPagerUpdateItem], focusOnItem: Int?, synchronous: Bool) {
         self.deleteItems = deleteItems
         self.insertItems = insertItems
         self.updateItems = updateItems
         self.focusOnItem = focusOnItem
+        self.synchronous = synchronous
     }
 }
 
@@ -100,6 +104,7 @@ public final class GalleryPagerNode: ASDisplayNode, UIScrollViewDelegate, UIGest
     private var invalidatedItems = false
     public var centralItemIndexOffsetUpdated: (([GalleryItem]?, Int, CGFloat)?) -> Void = { _ in }
     public var toggleControlsVisibility: () -> Void = { }
+    public var updateControlsVisibility: (Bool) -> Void = { _ in }
     public var dismiss: () -> Void = { }
     public var beginCustomDismiss: () -> Void = { }
     public var completeCustomDismiss: () -> Void = { }
@@ -145,7 +150,31 @@ public final class GalleryPagerNode: ASDisplayNode, UIScrollViewDelegate, UIGest
         let recognizer = TapLongTapOrDoubleTapGestureRecognizer(target: self, action: #selector(self.tapLongTapOrDoubleTapGesture(_:)))
         recognizer.delegate = self
         self.tapRecognizer = recognizer
-        recognizer.tapActionAtPoint = { _ in
+        recognizer.tapActionAtPoint = { [weak self] point in
+            guard let strongSelf = self else {
+                return .fail
+            }
+            
+            let size = strongSelf.bounds
+            
+            var highlightedSide: Bool?
+            if point.x < edgeWidth(width: size.width) && strongSelf.canGoToPreviousItem() {
+                if strongSelf.items.count > 1 {
+                    highlightedSide = false
+                }
+            } else if point.x > size.width - edgeWidth(width: size.width) && strongSelf.canGoToNextItem() {
+                if strongSelf.items.count > 1 {
+                    highlightedSide = true
+                }
+            }
+            
+            if highlightedSide == nil {
+                return .fail
+            }
+            
+            if let result = strongSelf.hitTest(point, with: nil), let node = result.asyncdisplaykit_node as? ASButtonNode {
+                return .fail
+            }
             return .keepWithSingleTap
         }
         recognizer.highlight = { [weak self] point in
@@ -156,11 +185,11 @@ public final class GalleryPagerNode: ASDisplayNode, UIScrollViewDelegate, UIGest
             
             var highlightedSide: Bool?
             if let point = point {
-                if point.x < edgeWidth && strongSelf.canGoToPreviousItem() {
+                if point.x < edgeWidth(width: size.width) && strongSelf.canGoToPreviousItem() {
                     if strongSelf.items.count > 1 {
                         highlightedSide = false
                     }
-                } else if point.x > size.width - edgeWidth && strongSelf.canGoToNextItem() {
+                } else if point.x > size.width - edgeWidth(width: size.width) && strongSelf.canGoToNextItem() {
                     if strongSelf.items.count > 1 {
                         highlightedSide = true
                     }
@@ -209,9 +238,9 @@ public final class GalleryPagerNode: ASDisplayNode, UIScrollViewDelegate, UIGest
             if let (gesture, location) = recognizer.lastRecognizedGestureAndLocation {
                 if case .tap = gesture {
                     let size = self.bounds.size
-                    if location.x < edgeWidth && self.canGoToPreviousItem() {
+                    if location.x < edgeWidth(width: size.width) && self.canGoToPreviousItem() {
                         self.goToPreviousItem()
-                    } else if location.x > size.width - edgeWidth && self.canGoToNextItem() {
+                    } else if location.x > size.width - edgeWidth(width: size.width) && self.canGoToNextItem() {
                         self.goToNextItem()
                     }
                 }
@@ -284,17 +313,13 @@ public final class GalleryPagerNode: ASDisplayNode, UIScrollViewDelegate, UIGest
         }
     }
     
-    public func replaceItems(_ items: [GalleryItem], centralItemIndex: Int?, keepFirst: Bool = false) {
-        var items = items
-        if keepFirst && !self.items.isEmpty && !items.isEmpty {
-            items[0] = self.items[0]
-        }
-        
+    public var updateOnReplacement = false
+    public func replaceItems(_ items: [GalleryItem], centralItemIndex: Int?, synchronous: Bool = false) {
         var updateItems: [GalleryPagerUpdateItem] = []
         var deleteItems: [Int] = []
         var insertItems: [GalleryPagerInsertItem] = []
         var previousIndexById: [AnyHashable: Int] = [:]
-        var validIds = Set(items.map { $0.id })
+        let validIds = Set(items.map { $0.id })
         
         for i in 0 ..< self.items.count {
             previousIndexById[self.items[i].id] = i
@@ -303,10 +328,40 @@ public final class GalleryPagerNode: ASDisplayNode, UIScrollViewDelegate, UIGest
             }
         }
         
-        for i in 0 ..< items.count {
-            insertItems.append(GalleryPagerInsertItem(index: i, item: items[i], previousIndex: previousIndexById[items[i].id]))
+        if self.updateOnReplacement {
+            for i in 0 ..< items.count {
+                if (previousIndexById[items[i].id] == nil)  {
+                    insertItems.append(GalleryPagerInsertItem(index: i, item: items[i], previousIndex: previousIndexById[items[i].id]))
+                } else {
+                    updateItems.append(GalleryPagerUpdateItem(index: i, previousIndex: i, item: items[i]))
+                }
+            }
+        } else {
+            for i in 0 ..< items.count {
+                insertItems.append(GalleryPagerInsertItem(index: i, item: items[i], previousIndex: previousIndexById[items[i].id]))
+            }
         }
-        self.transaction(GalleryPagerTransaction(deleteItems: deleteItems, insertItems: insertItems, updateItems: updateItems, focusOnItem: centralItemIndex))
+        
+        self.transaction(GalleryPagerTransaction(deleteItems: deleteItems, insertItems: insertItems, updateItems: updateItems, focusOnItem: centralItemIndex, synchronous: synchronous))
+        
+        if self.updateOnReplacement {
+            self.items = items
+            
+            for i in 0 ..< self.items.count {
+                if let itemNode = self.visibleItemNode(at: i) {
+                    self.items[i].updateNode(node: itemNode, synchronous: synchronous)
+                }
+            }
+            for i in (0 ..< self.itemNodes.count).reversed() {
+                let node = self.itemNodes[i]
+                if node.index > self.items.count - 1 {
+                    node.removeFromSupernode()
+                    self.itemNodes.remove(at: i)
+                }
+            }
+            
+            self.updateCentralIndexOffset(transition: .immediate)
+        }
     }
     
     public func transaction(_ transaction: GalleryPagerTransaction) {
@@ -314,10 +369,10 @@ public final class GalleryPagerNode: ASDisplayNode, UIScrollViewDelegate, UIGest
             self.items[updatedItem.previousIndex] = updatedItem.item
             if let itemNode = self.visibleItemNode(at: updatedItem.previousIndex) {
                 //print("update visible node at \(updatedItem.previousIndex)")
-                updatedItem.item.updateNode(node: itemNode)
+                updatedItem.item.updateNode(node: itemNode, synchronous: transaction.synchronous)
             }
         }
-        
+                
         if !transaction.deleteItems.isEmpty || !transaction.insertItems.isEmpty {
             let deleteItems = transaction.deleteItems.sorted()
             
@@ -368,7 +423,7 @@ public final class GalleryPagerNode: ASDisplayNode, UIScrollViewDelegate, UIGest
                 self.centralItemIndex = focusOnItem
             }
             
-            self.updateItemNodes(transition: .immediate)
+            self.updateItemNodes(transition: .immediate, notify: transaction.focusOnItem != nil, synchronous: transaction.synchronous)
             
             //print("visible indices after update \(self.itemNodes.map { $0.index })")
         }
@@ -376,7 +431,7 @@ public final class GalleryPagerNode: ASDisplayNode, UIScrollViewDelegate, UIGest
             self.ignoreCentralItemIndexUpdate = true
             self.centralItemIndex = focusOnItem
             self.ignoreCentralItemIndexUpdate = false
-            self.updateItemNodes(transition: .immediate, forceOffsetReset: true)
+            self.updateItemNodes(transition: .immediate, forceOffsetReset: true, synchronous: transaction.synchronous)
         }
     }
     
@@ -398,19 +453,20 @@ public final class GalleryPagerNode: ASDisplayNode, UIScrollViewDelegate, UIGest
     
     private func goToPreviousItem() {
         if let index = self.centralItemIndex, index > 0 {
-            self.transaction(GalleryPagerTransaction(deleteItems: [], insertItems: [], updateItems: [], focusOnItem: index - 1))
+            self.transaction(GalleryPagerTransaction(deleteItems: [], insertItems: [], updateItems: [], focusOnItem: index - 1, synchronous: false))
         }
     }
     
     private func goToNextItem() {
         if let index = self.centralItemIndex, index < self.items.count - 1 {
-            self.transaction(GalleryPagerTransaction(deleteItems: [], insertItems: [], updateItems: [], focusOnItem: index + 1))
+            self.transaction(GalleryPagerTransaction(deleteItems: [], insertItems: [], updateItems: [], focusOnItem: index + 1, synchronous: false))
         }
     }
     
-    private func makeNodeForItem(at index: Int) -> GalleryItemNode {
-        let node = self.items[index].node()
+    private func makeNodeForItem(at index: Int, synchronous: Bool) -> GalleryItemNode {
+        let node = self.items[index].node(synchronous: synchronous)
         node.toggleControlsVisibility = self.toggleControlsVisibility
+        node.updateControlsVisibility = self.updateControlsVisibility
         node.dismiss = self.dismiss
         node.beginCustomDismiss = self.beginCustomDismiss
         node.completeCustomDismiss = self.completeCustomDismiss
@@ -448,7 +504,7 @@ public final class GalleryPagerNode: ASDisplayNode, UIScrollViewDelegate, UIGest
         self.itemNodes.remove(at: internalIndex)
     }
     
-    private func updateItemNodes(transition: ContainedViewLayoutTransition, forceOffsetReset: Bool = false, forceLoad: Bool = false) {
+    private func updateItemNodes(transition: ContainedViewLayoutTransition, forceOffsetReset: Bool = false, notify: Bool = false, forceLoad: Bool = false, synchronous: Bool = false) {
         if self.items.isEmpty || self.containerLayout == nil {
             return
         }
@@ -460,7 +516,7 @@ public final class GalleryPagerNode: ASDisplayNode, UIScrollViewDelegate, UIGest
             } while self.itemNodes.count > 0
         }
         if self.itemNodes.isEmpty {
-            let node = self.makeNodeForItem(at: self.centralItemIndex ?? 0)
+            let node = self.makeNodeForItem(at: self.centralItemIndex ?? 0, synchronous: synchronous)
             node.frame = CGRect(origin: CGPoint(), size: scrollView.bounds.size)
             if let containerLayout = self.containerLayout {
                 node.containerLayoutUpdated(containerLayout.0, navigationBarHeight: containerLayout.1, transition: .immediate)
@@ -470,12 +526,12 @@ public final class GalleryPagerNode: ASDisplayNode, UIScrollViewDelegate, UIGest
             resetOffsetToCentralItem = true
         }
         
-        var notifyCentralItemUpdated = forceOffsetReset
+        var notifyCentralItemUpdated = forceOffsetReset || notify
         
         if let centralItemIndex = self.centralItemIndex, let centralItemNode = self.visibleItemNode(at: centralItemIndex) {
             if centralItemIndex != 0 {
                 if self.shouldLoadItems(force: forceLoad) && self.visibleItemNode(at: centralItemIndex - 1) == nil {
-                    let node = self.makeNodeForItem(at: centralItemIndex - 1)
+                    let node = self.makeNodeForItem(at: centralItemIndex - 1, synchronous: synchronous)
                     node.frame = centralItemNode.frame.offsetBy(dx: -centralItemNode.frame.size.width - self.pageGap, dy: 0.0)
                     if let containerLayout = self.containerLayout {
                         node.containerLayoutUpdated(containerLayout.0, navigationBarHeight: containerLayout.1, transition: .immediate)
@@ -486,7 +542,7 @@ public final class GalleryPagerNode: ASDisplayNode, UIScrollViewDelegate, UIGest
             
             if centralItemIndex != self.items.count - 1 {
                 if self.shouldLoadItems(force: forceLoad) && self.visibleItemNode(at: centralItemIndex + 1) == nil {
-                    let node = self.makeNodeForItem(at: centralItemIndex + 1)
+                    let node = self.makeNodeForItem(at: centralItemIndex + 1, synchronous: synchronous)
                     node.frame = centralItemNode.frame.offsetBy(dx: centralItemNode.frame.size.width + self.pageGap, dy: 0.0)
                     if let containerLayout = self.containerLayout {
                         node.containerLayoutUpdated(containerLayout.0, navigationBarHeight: containerLayout.1, transition: .immediate)
@@ -522,7 +578,7 @@ public final class GalleryPagerNode: ASDisplayNode, UIScrollViewDelegate, UIGest
                 
                 if centralItemCandidateNode.index != 0 {
                     if self.shouldLoadItems(force: forceLoad) && self.visibleItemNode(at: centralItemCandidateNode.index - 1) == nil {
-                        let node = self.makeNodeForItem(at: centralItemCandidateNode.index - 1)
+                        let node = self.makeNodeForItem(at: centralItemCandidateNode.index - 1, synchronous: synchronous)
                         node.frame = centralItemCandidateNode.frame.offsetBy(dx: -centralItemCandidateNode.frame.size.width - self.pageGap, dy: 0.0)
                         if let containerLayout = self.containerLayout {
                             node.containerLayoutUpdated(containerLayout.0, navigationBarHeight: containerLayout.1, transition: .immediate)
@@ -533,7 +589,7 @@ public final class GalleryPagerNode: ASDisplayNode, UIScrollViewDelegate, UIGest
                 
                 if centralItemCandidateNode.index != items.count - 1 {
                     if self.shouldLoadItems(force: forceLoad) && self.visibleItemNode(at: centralItemCandidateNode.index + 1) == nil {
-                        let node = self.makeNodeForItem(at: centralItemCandidateNode.index + 1)
+                        let node = self.makeNodeForItem(at: centralItemCandidateNode.index + 1, synchronous: synchronous)
                         node.frame = centralItemCandidateNode.frame.offsetBy(dx: centralItemCandidateNode.frame.size.width + self.pageGap, dy: 0.0)
                         if let containerLayout = self.containerLayout {
                             node.containerLayoutUpdated(containerLayout.0, navigationBarHeight: containerLayout.1, transition: .immediate)

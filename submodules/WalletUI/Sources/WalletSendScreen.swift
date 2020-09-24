@@ -275,7 +275,7 @@ private func walletSendScreenEntries(presentationData: WalletPresentationData, b
 
     let amount = amountValue(state.amount)
     let balance = max(0, balance ?? 0)
-    entries.append(.amount(presentationData.theme, state.amount ?? ""))
+    entries.append(.amount(presentationData.theme, state.amount))
     entries.append(.balance(presentationData.theme, presentationData.strings.Wallet_Send_Balance("").0, formatBalanceText(balance, decimalSeparator: presentationData.dateTimeFormat.decimalSeparator), balance == 0 || (amount > 0 && balance < amount)))
     
     entries.append(.addressHeader(presentationData.theme, presentationData.strings.Wallet_Send_AddressHeader))
@@ -284,6 +284,7 @@ private func walletSendScreenEntries(presentationData: WalletPresentationData, b
         
     entries.append(.commentHeader(presentationData.theme, presentationData.strings.Wallet_Receive_CommentHeader))
     entries.append(.comment(presentationData.theme, presentationData.strings.Wallet_Receive_CommentInfo, state.comment, sendEnabled))
+    
     return entries
 }
 
@@ -393,15 +394,15 @@ public func walletSendScreen(context: WalletContext, randomId: Int64, walletInfo
             let controller = OverlayStatusController(theme: presentationData.theme, type: .loading(cancelled: nil))
             presentControllerImpl?(controller, nil)
             
-            let _ = (verifySendGramsRequestAndEstimateFees(tonInstance: context.tonInstance, walletInfo: walletInfo, toAddress: destinationAddress, amount: amount, textMessage: commentData ?? Data(), timeout: 0)
-            |> deliverOnMainQueue).start(next: { [weak controller] fees in
+            let _ = (verifySendGramsRequestAndEstimateFees(tonInstance: context.tonInstance, walletInfo: walletInfo, toAddress: destinationAddress, amount: amount, comment: commentData ?? Data(), encryptComment: true, timeout: 0)
+            |> deliverOnMainQueue).start(next: { [weak controller] verificationResult in
                 controller?.dismiss()
                 
                 let presentationData = context.presentationData
                 
                 let title = NSAttributedString(string: presentationData.strings.Wallet_Send_Confirmation, font: Font.semibold(17.0), textColor: presentationData.theme.list.itemPrimaryTextColor)
                 
-                let feeAmount = fees.inFwdFee + fees.storageFee + fees.gasFee + fees.fwdFee
+                let feeAmount = verificationResult.fees.inFwdFee + verificationResult.fees.storageFee + verificationResult.fees.gasFee + verificationResult.fees.fwdFee
                 
                 let (text, ranges) = presentationData.strings.Wallet_Send_ConfirmationText(formatBalanceText(amount, decimalSeparator: presentationData.dateTimeFormat.decimalSeparator), formattedAddress, "\(formatBalanceText(feeAmount, decimalSeparator: presentationData.dateTimeFormat.decimalSeparator))")
                 let bodyAttributes = MarkdownAttributeSet(font: Font.regular(13.0), textColor: presentationData.theme.list.itemPrimaryTextColor)
@@ -411,6 +412,11 @@ public func walletSendScreen(context: WalletContext, randomId: Int64, walletInfo
                     if index == 1 {
                         attributedText.addAttribute(.font, value: Font.monospace(14.0), range: range)
                     }
+                }
+                
+                if verificationResult.canNotEncryptComment {
+                    //TODO:localize
+                    attributedText.append(NSAttributedString(string: "\n\nThe destination wallet is not initialized. The comment will be sent unencrypted.", font: Font.regular(13.0), textColor: presentationData.theme.list.itemDestructiveColor))
                 }
                 
                 var dismissAlertImpl: ((Bool) -> Void)?
@@ -449,7 +455,7 @@ public func walletSendScreen(context: WalletContext, randomId: Int64, walletInfo
                     |> deliverOnMainQueue).start(next: { serverSalt in
                         if let serverSalt = serverSalt {
                             if let commentData = state.comment.data(using: .utf8) {
-                                pushImpl?(WalletSplashScreen(context: context, mode: .sending(walletInfo, state.address, amount, commentData, randomId, serverSalt), walletCreatedPreloadState: nil))
+                                pushImpl?(WalletSplashScreen(context: context, mode: .sending(WalletSplashModeSending(walletInfo: walletInfo, address: state.address, amount: amount, comment: commentData, encryptComment: !verificationResult.canNotEncryptComment, randomId: randomId, serverSalt: serverSalt)), walletCreatedPreloadState: nil))
                             }
                         }
                     })
@@ -495,7 +501,7 @@ public func walletSendScreen(context: WalletContext, randomId: Int64, walletInfo
             })
         }
         
-        let _ = (walletAddress(publicKey: walletInfo.publicKey, tonInstance: context.tonInstance)
+        let _ = (walletAddress(walletInfo: walletInfo, tonInstance: context.tonInstance)
         |> deliverOnMainQueue).start(next: { walletAddress in
             let presentationData = context.presentationData
             let state = stateValue.with { $0 }
@@ -566,7 +572,7 @@ public func walletSendScreen(context: WalletContext, randomId: Int64, walletInfo
         var emptyItem: ItemListControllerEmptyStateItem?
         if let walletState = walletState {
             let textLength: Int = state.comment.data(using: .utf8, allowLossyConversion: true)?.count ?? 0
-            sendEnabled = isValidAddress(state.address, exactLength: true) && amount > 0 && amount <= walletState.balance && textLength <= walletTextLimit
+            sendEnabled = isValidAddress(state.address, exactLength: true) && amount > 0 && amount <= walletState.effectiveAvailableBalance && textLength <= walletTextLimit
 
             rightNavigationButton = ItemListNavigationButton(content: .text(presentationData.strings.Wallet_Send_Send), style: .bold, enabled: sendEnabled, action: {
                 arguments.proceed()
@@ -577,7 +583,7 @@ public func walletSendScreen(context: WalletContext, randomId: Int64, walletInfo
         }
 
         let controllerState = ItemListControllerState(theme: presentationData.theme, title: .text(presentationData.strings.Wallet_Send_Title), leftNavigationButton: leftNavigationButton, rightNavigationButton: rightNavigationButton, backNavigationButton: ItemListBackButton(title: presentationData.strings.Wallet_Navigation_Back), animateChanges: false)
-        let listState = ItemListNodeState(entries: walletSendScreenEntries(presentationData: presentationData, balance: walletState?.balance, state: state, sendEnabled: sendEnabled), style: .blocks, focusItemTag: focusItemTag, emptyStateItem: emptyItem, animateChanges: false)
+        let listState = ItemListNodeState(entries: walletSendScreenEntries(presentationData: presentationData, balance: walletState?.effectiveAvailableBalance, state: state, sendEnabled: sendEnabled), style: .blocks, focusItemTag: focusItemTag, emptyStateItem: emptyItem, animateChanges: false)
         
         return (controllerState, (listState, arguments))
     }
@@ -595,7 +601,7 @@ public func walletSendScreen(context: WalletContext, randomId: Int64, walletInfo
         controller?.push(c)
     }
     popImpl = { [weak controller] in
-        (controller?.navigationController as? NavigationController)?.popViewController(animated: true)
+        let _ = (controller?.navigationController as? NavigationController)?.popViewController(animated: true)
     }
     dismissImpl = { [weak controller] in
         controller?.view.endEditing(true)
@@ -629,7 +635,6 @@ public func walletSendScreen(context: WalletContext, randomId: Int64, walletInfo
             }
             
             var resultItemNode: ListViewItemNode?
-            let state = stateValue.with({ $0 })
             let _ = controller.frameForItemNode({ itemNode in
                 if let itemNode = itemNode as? ItemListItemNode {
                     if let tag = itemNode.tag, tag.isEqual(to: targetTag) {

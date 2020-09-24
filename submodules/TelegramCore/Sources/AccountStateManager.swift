@@ -296,6 +296,7 @@ public final class AccountStateManager {
         var collectedPollCompletionSubscribers: [(Int32, ([MessageId]) -> Void)] = []
         var collectedReplayAsynchronouslyBuiltFinalState: [(AccountFinalState, () -> Void)] = []
         var processEvents: [(Int32, AccountFinalStateEvents)] = []
+        var customOperations: [(Int32, Signal<Void, NoError>)] = []
         
         var replacedOperations: [AccountStateManagerOperation] = []
         
@@ -313,6 +314,8 @@ public final class AccountStateManager {
                         collectedReplayAsynchronouslyBuiltFinalState.append((finalState, completion))
                     case let .processEvents(operationId, events):
                         processEvents.append((operationId, events))
+                    case let .custom(operationId, customSignal):
+                        customOperations.append((operationId, customSignal))
                     default:
                         break
                 }
@@ -333,6 +336,10 @@ public final class AccountStateManager {
         
         for (operationId, events) in processEvents {
             replacedOperations.append(AccountStateManagerOperation(content: .processEvents(operationId, events)))
+        }
+        
+        for (operationId, customSignal) in customOperations {
+            replacedOperations.append(AccountStateManagerOperation(content: .custom(operationId, customSignal)))
         }
         
         self.operations.removeAll()
@@ -644,6 +651,11 @@ public final class AccountStateManager {
                             if !events.updatedCalls.isEmpty {
                                 for call in events.updatedCalls {
                                     strongSelf.callSessionManager.updateSession(call, completion: { _ in })
+                                }
+                            }
+                            if !events.addedCallSignalingData.isEmpty {
+                                for (id, data) in events.addedCallSignalingData {
+                                    strongSelf.callSessionManager.addCallSignalingData(id: id, data: data)
                                 }
                             }
                             if !events.isContactUpdates.isEmpty {

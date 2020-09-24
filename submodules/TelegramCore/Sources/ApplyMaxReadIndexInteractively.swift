@@ -23,7 +23,7 @@ func applyMaxReadIndexInteractively(transaction: Transaction, stateManager: Acco
                             transaction.updateMessage(message.id, update: { currentMessage in
                                 var storeForwardInfo: StoreMessageForwardInfo?
                                 if let forwardInfo = currentMessage.forwardInfo {
-                                    storeForwardInfo = StoreMessageForwardInfo(authorId: forwardInfo.author?.id, sourceId: forwardInfo.source?.id, sourceMessageId: forwardInfo.sourceMessageId, date: forwardInfo.date, authorSignature: forwardInfo.authorSignature)
+                                    storeForwardInfo = StoreMessageForwardInfo(authorId: forwardInfo.author?.id, sourceId: forwardInfo.source?.id, sourceMessageId: forwardInfo.sourceMessageId, date: forwardInfo.date, authorSignature: forwardInfo.authorSignature, psaType: forwardInfo.psaType)
                                 }
                                 let updatedAttributes = currentMessage.attributes.map({ currentAttribute -> MessageAttribute in
                                     if let currentAttribute = currentAttribute as? AutoremoveTimeoutMessageAttribute {
@@ -92,7 +92,7 @@ func applySecretOutgoingMessageReadActions(transaction: Transaction, id: Message
                         transaction.updateMessage(message.id, update: { currentMessage in
                             var storeForwardInfo: StoreMessageForwardInfo?
                             if let forwardInfo = currentMessage.forwardInfo {
-                                storeForwardInfo = StoreMessageForwardInfo(authorId: forwardInfo.author?.id, sourceId: forwardInfo.source?.id, sourceMessageId: forwardInfo.sourceMessageId, date: forwardInfo.date, authorSignature: forwardInfo.authorSignature)
+                                storeForwardInfo = StoreMessageForwardInfo(authorId: forwardInfo.author?.id, sourceId: forwardInfo.source?.id, sourceMessageId: forwardInfo.sourceMessageId, date: forwardInfo.date, authorSignature: forwardInfo.authorSignature, psaType: forwardInfo.psaType)
                             }
                             let updatedAttributes = currentMessage.attributes.map({ currentAttribute -> MessageAttribute in
                                 if let currentAttribute = currentAttribute as? AutoremoveTimeoutMessageAttribute {
@@ -135,6 +135,14 @@ public func togglePeerUnreadMarkInteractively(transaction: Transaction, viewTrac
         }
     }
     
+    if !hasUnread && peerId.namespace == Namespaces.Peer.SecretChat {
+        let unseenSummary = transaction.getMessageTagSummary(peerId: peerId, tagMask: .unseenPersonalMessage, namespace: Namespaces.Message.Cloud)
+        let actionSummary = transaction.getPendingMessageActionsSummary(peerId: peerId, type: PendingMessageActionType.consumeUnseenPersonalMessage, namespace: Namespaces.Message.Cloud)
+        if (unseenSummary?.count ?? 0) - (actionSummary ?? 0) > 0 {
+            hasUnread = true
+        }
+    }
+    
     if hasUnread {
         if setToValue == nil || !(setToValue!) {
             if let index = transaction.getTopPeerMessageIndex(peerId: peerId) {
@@ -161,8 +169,8 @@ public func clearPeerUnseenPersonalMessagesInteractively(account: Account, peerI
     |> ignoreValues
 }
 
-public func markAllChatsAsReadInteractively(transaction: Transaction, viewTracker: AccountViewTracker, groupId: PeerGroupId) {
-    for peerId in transaction.getUnreadChatListPeerIds(groupId: groupId) {
+public func markAllChatsAsReadInteractively(transaction: Transaction, viewTracker: AccountViewTracker, groupId: PeerGroupId, filterPredicate: ChatListFilterPredicate?) {
+    for peerId in transaction.getUnreadChatListPeerIds(groupId: groupId, filterPredicate: filterPredicate) {
         togglePeerUnreadMarkInteractively(transaction: transaction, viewTracker: viewTracker, peerId: peerId, setToValue: false)
     }
 }

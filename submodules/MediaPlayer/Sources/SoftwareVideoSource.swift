@@ -2,7 +2,7 @@ import Foundation
 import UIKit
 import CoreMedia
 import SwiftSignalKit
-import FFMpeg
+import FFMpegBinding
 
 private func readPacketCallback(userData: UnsafeMutableRawPointer?, buffer: UnsafeMutablePointer<UInt8>?, bufferSize: Int32) -> Int32 {
     let context = Unmanaged<SoftwareVideoSource>.fromOpaque(userData!).takeUnretainedValue()
@@ -54,6 +54,9 @@ public final class SoftwareVideoSource {
     fileprivate let fd: Int32?
     fileprivate let size: Int32
     
+    private var enqueuedFrames: [(MediaTrackFrame, CGFloat, CGFloat, Bool)] = []
+    private var hasReadToEnd: Bool = false
+    
     public init(path: String) {
         let _ = FFMpegMediaFrameSourceContextHelpers.registerFFMpegGlobals
         
@@ -74,7 +77,7 @@ public final class SoftwareVideoSource {
         
         let ioBufferSize = 64 * 1024
         
-        let avIoContext = FFMpegAVIOContext(bufferSize: Int32(ioBufferSize), opaqueContext: Unmanaged.passUnretained(self).toOpaque(), readPacket: readPacketCallback, seek: seekCallback)
+        let avIoContext = FFMpegAVIOContext(bufferSize: Int32(ioBufferSize), opaqueContext: Unmanaged.passUnretained(self).toOpaque(), readPacket: readPacketCallback, writePacket: nil, seek: seekCallback)
         self.avIoContext = avIoContext
         
         avFormatContext.setIO(self.avIoContext!)
@@ -123,6 +126,10 @@ public final class SoftwareVideoSource {
         }
         
         self.videoStream = videoStream
+        
+        if let videoStream = self.videoStream {
+            avFormatContext.seekFrame(forStreamIndex: Int32(videoStream.index), pts: 0, positionOnKeyframe: true)
+        }
     }
     
     deinit {
@@ -174,7 +181,7 @@ public final class SoftwareVideoSource {
                 } else {
                     if let avFormatContext = self.avFormatContext, let videoStream = self.videoStream {
                         endOfStream = true
-                        avFormatContext.seekFrame(forStreamIndex: Int32(videoStream.index), pts: 0, positionOnKeyframe: true)
+                        break
                     } else {
                         endOfStream = true
                         break
@@ -183,30 +190,44 @@ public final class SoftwareVideoSource {
             }
         }
         
-        if endOfStream {
-            if let videoStream = self.videoStream {
-                videoStream.decoder.reset()
-            }
-        }
-        
         return (frames.first, endOfStream)
     }
     
     public func readFrame(maxPts: CMTime?) -> (MediaTrackFrame?, CGFloat, CGFloat, Bool) {
-        if let videoStream = self.videoStream {
-            let (decodableFrame, loop) = self.readDecodableFrame()
-            if let decodableFrame = decodableFrame {
-                var ptsOffset: CMTime?
-                if let maxPts = maxPts, CMTimeCompare(decodableFrame.pts, maxPts) < 0 {
-                    ptsOffset = maxPts
-                }
-                return (videoStream.decoder.decode(frame: decodableFrame, ptsOffset: ptsOffset), CGFloat(videoStream.rotationAngle), CGFloat(videoStream.aspect), loop)
-            } else {
-                return (nil, CGFloat(videoStream.rotationAngle), CGFloat(videoStream.aspect), loop)
-            }
-        } else {
+        guard let videoStream = self.videoStream, let avFormatContext = self.avFormatContext else {
             return (nil, 0.0, 1.0, false)
         }
+        
+        if !self.enqueuedFrames.isEmpty {
+            let value = self.enqueuedFrames.removeFirst()
+            return (value.0, value.1, value.2, value.3)
+        }
+        
+        let (decodableFrame, loop) = self.readDecodableFrame()
+        var result: (MediaTrackFrame?, CGFloat, CGFloat, Bool)
+        if let decodableFrame = decodableFrame {
+            var ptsOffset: CMTime?
+            if let maxPts = maxPts, CMTimeCompare(decodableFrame.pts, maxPts) < 0 {
+                ptsOffset = maxPts
+            }
+            result = (videoStream.decoder.decode(frame: decodableFrame, ptsOffset: ptsOffset), CGFloat(videoStream.rotationAngle), CGFloat(videoStream.aspect), loop)
+        } else {
+            result = (nil, CGFloat(videoStream.rotationAngle), CGFloat(videoStream.aspect), loop)
+        }
+        if loop {
+            let _ = videoStream.decoder.sendEndToDecoder()
+            let remainingFrames = videoStream.decoder.receiveRemainingFrames(ptsOffset: maxPts)
+            for i in 0 ..< remainingFrames.count {
+                self.enqueuedFrames.append((remainingFrames[i], CGFloat(videoStream.rotationAngle), CGFloat(videoStream.aspect), i == remainingFrames.count - 1))
+            }
+            videoStream.decoder.reset()
+            avFormatContext.seekFrame(forStreamIndex: Int32(videoStream.index), pts: 0, positionOnKeyframe: true)
+            
+            if result.0 == nil && !self.enqueuedFrames.isEmpty {
+                result = self.enqueuedFrames.removeFirst()
+            }
+        }
+        return result
     }
     
     public func readImage() -> (UIImage?, CGFloat, CGFloat, Bool) {

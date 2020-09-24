@@ -53,7 +53,7 @@ func augmentMediaWithReference(_ mediaReference: AnyMediaReference) -> Media {
 
 private func convertForwardedMediaForSecretChat(_ media: Media) -> Media {
     if let file = media as? TelegramMediaFile {
-        return TelegramMediaFile(fileId: MediaId(namespace: Namespaces.Media.LocalFile, id: arc4random64()), partialReference: file.partialReference, resource: file.resource, previewRepresentations: file.previewRepresentations, immediateThumbnailData: file.immediateThumbnailData, mimeType: file.mimeType, size: file.size, attributes: file.attributes)
+        return TelegramMediaFile(fileId: MediaId(namespace: Namespaces.Media.LocalFile, id: arc4random64()), partialReference: file.partialReference, resource: file.resource, previewRepresentations: file.previewRepresentations, videoThumbnails: file.videoThumbnails, immediateThumbnailData: file.immediateThumbnailData, mimeType: file.mimeType, size: file.size, attributes: file.attributes)
     } else if let image = media as? TelegramMediaImage {
         return TelegramMediaImage(imageId: MediaId(namespace: Namespaces.Media.LocalImage, id: arc4random64()), representations: image.representations, immediateThumbnailData: image.immediateThumbnailData, reference: image.reference, partialReference: image.partialReference, flags: [])
     } else {
@@ -69,7 +69,7 @@ private func filterMessageAttributesForOutgoingMessage(_ attributes: [MessageAtt
             case _ as InlineBotMessageAttribute:
                 return true
             case _ as OutgoingMessageInfoAttribute:
-                return true
+                return false
             case _ as OutgoingContentInfoMessageAttribute:
                 return true
             case _ as ReplyMarkupMessageAttribute:
@@ -473,7 +473,7 @@ func enqueueMessages(transaction: Transaction, account: Account, peerId: PeerId,
                             }
                             
                             if let sourceForwardInfo = sourceMessage.forwardInfo {
-                                forwardInfo = StoreMessageForwardInfo(authorId: sourceForwardInfo.author?.id, sourceId: sourceForwardInfo.source?.id, sourceMessageId: sourceForwardInfo.sourceMessageId, date: sourceForwardInfo.date, authorSignature: sourceForwardInfo.authorSignature)
+                                forwardInfo = StoreMessageForwardInfo(authorId: sourceForwardInfo.author?.id, sourceId: sourceForwardInfo.source?.id, sourceMessageId: sourceForwardInfo.sourceMessageId, date: sourceForwardInfo.date, authorSignature: sourceForwardInfo.authorSignature, psaType: nil)
                             } else {
                                 if sourceMessage.id.peerId != account.peerId {
                                     var hasHiddenForwardMedia = false
@@ -501,7 +501,9 @@ func enqueueMessages(transaction: Transaction, account: Account, peerId: PeerId,
                                             }
                                         }
                                         
-                                        forwardInfo = StoreMessageForwardInfo(authorId: author.id, sourceId: sourceId, sourceMessageId: sourceMessageId, date: sourceMessage.timestamp, authorSignature: authorSignature)
+                                        let psaType: String? = nil
+                                        
+                                        forwardInfo = StoreMessageForwardInfo(authorId: author.id, sourceId: sourceId, sourceMessageId: sourceMessageId, date: sourceMessage.timestamp, authorSignature: authorSignature, psaType: psaType)
                                     }
                                 } else {
                                     forwardInfo = nil

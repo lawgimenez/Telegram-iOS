@@ -14,7 +14,7 @@
     You should have received a copy of the GNU Lesser General Public License
     along with TON Blockchain Library.  If not, see <http://www.gnu.org/licenses/>.
 
-    Copyright 2017-2019 Telegram Systems LLP
+    Copyright 2017-2020 Telegram Systems LLP
 */
 #include "check-proof.h"
 #include "block/block.h"
@@ -25,13 +25,13 @@
 #include "ton/ton-shard.h"
 
 #include "vm/cells/MerkleProof.h"
-#include "openssl/digest.h"
+#include "openssl/digest.hpp"
 #include "Ed25519.h"
 
 namespace block {
 using namespace std::literals::string_literals;
 
-td::Status check_block_header_proof(td::Ref<vm::Cell> root, ton::BlockIdExt blkid, ton::Bits256* store_shard_hash_to,
+td::Status check_block_header_proof(td::Ref<vm::Cell> root, ton::BlockIdExt blkid, ton::Bits256* store_state_hash_to,
                                     bool check_state_hash, td::uint32* save_utime, ton::LogicalTime* save_lt) {
   ton::RootHash vhash{root->get_hash().bits()};
   if (vhash != blkid.root_hash) {
@@ -53,7 +53,7 @@ td::Status check_block_header_proof(td::Ref<vm::Cell> root, ton::BlockIdExt blki
   if (save_lt) {
     *save_lt = info.end_lt;
   }
-  if (store_shard_hash_to) {
+  if (store_state_hash_to) {
     vm::CellSlice upd_cs{vm::NoVmSpec(), blk.state_update};
     if (!(upd_cs.is_special() && upd_cs.prefetch_long(8) == 4  // merkle update
           && upd_cs.size_ext() == 0x20228)) {
@@ -61,11 +61,11 @@ td::Status check_block_header_proof(td::Ref<vm::Cell> root, ton::BlockIdExt blki
     }
     auto upd_hash = upd_cs.prefetch_ref(1)->get_hash(0);
     if (!check_state_hash) {
-      *store_shard_hash_to = upd_hash.bits();
-    } else if (store_shard_hash_to->compare(upd_hash.bits())) {
+      *store_state_hash_to = upd_hash.bits();
+    } else if (store_state_hash_to->compare(upd_hash.bits())) {
       return td::Status::Error(PSTRING() << "state hash mismatch in block header of " << blkid.to_str()
                                          << " : header declares " << upd_hash.bits().to_hex(256) << " expected "
-                                         << store_shard_hash_to->to_hex());
+                                         << store_state_hash_to->to_hex());
     }
   }
   return td::Status::OK();
@@ -219,7 +219,17 @@ td::Status check_account_proof(td::Slice proof, ton::BlockIdExt shard_blk, const
 }
 
 td::Result<AccountState::Info> AccountState::validate(ton::BlockIdExt ref_blk, block::StdAddress addr) const {
-  TRY_RESULT_PREFIX(root, vm::std_boc_deserialize(state.as_slice(), true), "cannot deserialize account state");
+  TRY_RESULT_PREFIX(true_root, vm::std_boc_deserialize(state.as_slice(), true), "cannot deserialize account state");
+  Ref<vm::Cell> root;
+
+  if (is_virtualized && true_root.not_null()) {
+    root = vm::MerkleProof::virtualize(true_root, 1);
+    if (root.is_null()) {
+      return td::Status::Error("account state proof is invalid");
+    }
+  } else {
+    root = true_root;
+  }
 
   if (blk != ref_blk && ref_blk.id.seqno != ~0U) {
     return td::Status::Error(PSLICE() << "obtained getAccountState() for a different reference block " << blk.to_str()
@@ -241,6 +251,7 @@ td::Result<AccountState::Info> AccountState::validate(ton::BlockIdExt ref_blk, b
   TRY_STATUS(block::check_account_proof(proof.as_slice(), shard_blk, addr, root, &res.last_trans_lt,
                                         &res.last_trans_hash, &res.gen_utime, &res.gen_lt));
   res.root = std::move(root);
+  res.true_root = std::move(true_root);
 
   return res;
 }

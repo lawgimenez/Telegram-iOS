@@ -1,10 +1,12 @@
 import Foundation
+import UIKit
 import Postbox
 import TelegramCore
 import SyncCore
 import TelegramPresentationData
 import TelegramUIPreferences
 import SwiftSignalKit
+import AsyncDisplayKit
 import Display
 import DeviceLocationManager
 import TemporaryCachedPeerDataManager
@@ -87,7 +89,7 @@ public enum TextLinkItemActionType {
 }
 
 public enum TextLinkItem {
-    case url(String)
+    case url(url: String, concealed: Bool)
     case mention(String)
     case hashtag(String?, String)
 }
@@ -190,6 +192,63 @@ public enum NavigateToChatKeepStack {
     case never
 }
 
+public final class ChatPeekTimeout {
+    public let deadline: Int32
+    public let linkData: String
+    
+    public init(deadline: Int32, linkData: String) {
+        self.deadline = deadline
+        self.linkData = linkData
+    }
+}
+
+public final class ChatPeerNearbyData: Equatable {
+    public static func == (lhs: ChatPeerNearbyData, rhs: ChatPeerNearbyData) -> Bool {
+        if let lhsSticker = lhs.sticker, let rhsSticker = rhs.sticker, !lhsSticker.isEqual(to: rhsSticker) {
+            return false
+        } else if (lhs.sticker == nil) != (rhs.sticker == nil) {
+            return false
+        }
+        return lhs.distance == rhs.distance
+    }
+    
+    public let distance: Int32
+    public let sticker: TelegramMediaFile?
+    
+    public init(distance: Int32, sticker: TelegramMediaFile?) {
+        self.distance = distance
+        self.sticker = sticker
+    }
+}
+
+public enum ChatSearchDomain: Equatable {
+    case everything
+    case members
+    case member(Peer)
+    
+    public static func ==(lhs: ChatSearchDomain, rhs: ChatSearchDomain) -> Bool {
+        switch lhs {
+            case .everything:
+                if case .everything = rhs {
+                    return true
+                } else {
+                    return false
+                }
+            case .members:
+                if case .members = rhs {
+                    return true
+                } else {
+                    return false
+                }
+            case let .member(lhsPeer):
+                if case let .member(rhsPeer) = rhs, lhsPeer.isEqual(rhsPeer) {
+                    return true
+                } else {
+                    return false
+                }
+        }
+    }
+}
 public final class NavigateToChatControllerParams {
     public let navigationController: NavigationController
     public let chatController: ChatController?
@@ -200,15 +259,18 @@ public final class NavigateToChatControllerParams {
     public let updateTextInputState: ChatTextInputState?
     public let activateInput: Bool
     public let keepStack: NavigateToChatKeepStack
+    public let useExisting: Bool
     public let purposefulAction: (() -> Void)?
     public let scrollToEndIfExists: Bool
-    public let activateMessageSearch: Bool
+    public let activateMessageSearch: (ChatSearchDomain, String)?
+    public let peekData: ChatPeekTimeout?
+    public let peerNearbyData: ChatPeerNearbyData?
     public let animated: Bool
     public let options: NavigationAnimationOptions
     public let parentGroupId: PeerGroupId?
-    public let completion: () -> Void
+    public let completion: (ChatController) -> Void
     
-    public init(navigationController: NavigationController, chatController: ChatController? = nil, context: AccountContext, chatLocation: ChatLocation, subject: ChatControllerSubject? = nil, botStart: ChatControllerInitialBotStart? = nil, updateTextInputState: ChatTextInputState? = nil, activateInput: Bool = false, keepStack: NavigateToChatKeepStack = .default, purposefulAction: (() -> Void)? = nil, scrollToEndIfExists: Bool = false, activateMessageSearch: Bool = false, animated: Bool = true, options: NavigationAnimationOptions = [], parentGroupId: PeerGroupId? = nil, completion: @escaping () -> Void = {}) {
+    public init(navigationController: NavigationController, chatController: ChatController? = nil, context: AccountContext, chatLocation: ChatLocation, subject: ChatControllerSubject? = nil, botStart: ChatControllerInitialBotStart? = nil, updateTextInputState: ChatTextInputState? = nil, activateInput: Bool = false, keepStack: NavigateToChatKeepStack = .default, useExisting: Bool = true, purposefulAction: (() -> Void)? = nil, scrollToEndIfExists: Bool = false, activateMessageSearch: (ChatSearchDomain, String)? = nil, peekData: ChatPeekTimeout? = nil, peerNearbyData: ChatPeerNearbyData? = nil, animated: Bool = true, options: NavigationAnimationOptions = [], parentGroupId: PeerGroupId? = nil, completion: @escaping (ChatController) -> Void = { _ in }) {
         self.navigationController = navigationController
         self.chatController = chatController
         self.context = context
@@ -218,9 +280,12 @@ public final class NavigateToChatControllerParams {
         self.updateTextInputState = updateTextInputState
         self.activateInput = activateInput
         self.keepStack = keepStack
+        self.useExisting = useExisting
         self.purposefulAction = purposefulAction
         self.scrollToEndIfExists = scrollToEndIfExists
         self.activateMessageSearch = activateMessageSearch
+        self.peekData = peekData
+        self.peerNearbyData = peerNearbyData
         self.animated = animated
         self.options = options
         self.parentGroupId = parentGroupId
@@ -259,7 +324,8 @@ public enum DeviceContactInfoSubject {
 public enum PeerInfoControllerMode {
     case generic
     case calls(messages: [Message])
-    case nearbyPeer
+    case nearbyPeer(distance: Int32)
+    case group(PeerId)
 }
 
 public enum ContactListActionItemInlineIconPosition {
@@ -328,6 +394,12 @@ public enum ContactListPeerId: Hashable {
     case deviceContact(DeviceContactStableId)
 }
 
+public enum ContactListAction: Equatable {
+    case generic
+    case voiceCall
+    case videoCall
+}
+
 public enum ContactListPeer: Equatable {
     case peer(peer: Peer, isGlobal: Bool, participantCount: Int32?)
     case deviceContact(DeviceContactStableId, DeviceContactBasicData)
@@ -374,14 +446,16 @@ public final class ContactSelectionControllerParams {
     public let title: (PresentationStrings) -> String
     public let options: [ContactListAdditionalOption]
     public let displayDeviceContacts: Bool
+    public let displayCallIcons: Bool
     public let confirmation: (ContactListPeer) -> Signal<Bool, NoError>
     
-    public init(context: AccountContext, autoDismiss: Bool = true, title: @escaping (PresentationStrings) -> String, options: [ContactListAdditionalOption] = [], displayDeviceContacts: Bool = false, confirmation: @escaping (ContactListPeer) -> Signal<Bool, NoError> = { _ in .single(true) }) {
+    public init(context: AccountContext, autoDismiss: Bool = true, title: @escaping (PresentationStrings) -> String, options: [ContactListAdditionalOption] = [], displayDeviceContacts: Bool = false, displayCallIcons: Bool = false, confirmation: @escaping (ContactListPeer) -> Signal<Bool, NoError> = { _ in .single(true) }) {
         self.context = context
         self.autoDismiss = autoDismiss
         self.title = title
         self.options = options
         self.displayDeviceContacts = displayDeviceContacts
+        self.displayCallIcons = displayCallIcons
         self.confirmation = confirmation
     }
 }
@@ -451,12 +525,13 @@ public protocol SharedAccountContext: class {
     func messageFromPreloadedChatHistoryViewForLocation(id: MessageId, location: ChatHistoryLocationInput, account: Account, chatLocation: ChatLocation, tagMask: MessageTags?) -> Signal<(MessageIndex?, Bool), NoError>
     func makeOverlayAudioPlayerController(context: AccountContext, peerId: PeerId, type: MediaManagerPlayerType, initialMessageId: MessageId, initialOrder: MusicPlaybackSettingsOrder, parentNavigationController: NavigationController?) -> ViewController & OverlayAudioPlayerController
     func makePeerInfoController(context: AccountContext, peer: Peer, mode: PeerInfoControllerMode, avatarInitiallyExpanded: Bool, fromChat: Bool) -> ViewController?
+    func makeChannelAdminController(context: AccountContext, peerId: PeerId, adminId: PeerId, initialParticipant: ChannelParticipant) -> ViewController?
     func makeDeviceContactInfoController(context: AccountContext, subject: DeviceContactInfoSubject, completed: (() -> Void)?, cancelled: (() -> Void)?) -> ViewController
     func makePeersNearbyController(context: AccountContext) -> ViewController
     func makeComposeController(context: AccountContext) -> ViewController
     func makeChatListController(context: AccountContext, groupId: PeerGroupId, controlsHistoryPreload: Bool, hideNetworkActivityStatus: Bool, previewing: Bool, enableDebugActions: Bool) -> ChatListController
     func makeChatController(context: AccountContext, chatLocation: ChatLocation, subject: ChatControllerSubject?, botStart: ChatControllerInitialBotStart?, mode: ChatControllerPresentationMode) -> ChatController
-    func makeChatMessagePreviewItem(context: AccountContext, message: Message, theme: PresentationTheme, strings: PresentationStrings, wallpaper: TelegramWallpaper, fontSize: PresentationFontSize, chatBubbleCorners: PresentationChatBubbleCorners, dateTimeFormat: PresentationDateTimeFormat, nameOrder: PresentationPersonNameOrder, forcedResourceStatus: FileMediaResourceStatus?, tapMessage: ((Message) -> Void)?, clickThroughMessage: (() -> Void)?) -> ListViewItem
+    func makeChatMessagePreviewItem(context: AccountContext, messages: [Message], theme: PresentationTheme, strings: PresentationStrings, wallpaper: TelegramWallpaper, fontSize: PresentationFontSize, chatBubbleCorners: PresentationChatBubbleCorners, dateTimeFormat: PresentationDateTimeFormat, nameOrder: PresentationPersonNameOrder, forcedResourceStatus: FileMediaResourceStatus?, tapMessage: ((Message) -> Void)?, clickThroughMessage: (() -> Void)?) -> ListViewItem
     func makeChatMessageDateHeaderItem(context: AccountContext, timestamp: Int32, theme: PresentationTheme, strings: PresentationStrings, wallpaper: TelegramWallpaper, fontSize: PresentationFontSize, chatBubbleCorners: PresentationChatBubbleCorners, dateTimeFormat: PresentationDateTimeFormat, nameOrder: PresentationPersonNameOrder) -> ListViewItemHeader
     func makePeerSharedMediaController(context: AccountContext, peerId: PeerId) -> ViewController?
     func makeContactSelectionController(_ params: ContactSelectionControllerParams) -> ContactSelectionController
@@ -465,7 +540,8 @@ public protocol SharedAccountContext: class {
     func makeProxySettingsController(context: AccountContext) -> ViewController
     func makeLocalizationListController(context: AccountContext) -> ViewController
     func makeCreateGroupController(context: AccountContext, peerIds: [PeerId], initialTitle: String?, mode: CreateGroupMode, completion: ((PeerId, @escaping () -> Void) -> Void)?) -> ViewController
-    func makeChatRecentActionsController(context: AccountContext, peer: Peer) -> ViewController
+    func makeChatRecentActionsController(context: AccountContext, peer: Peer, adminPeerId: PeerId?) -> ViewController
+    func makePrivacyAndSecurityController(context: AccountContext) -> ViewController
     func navigateToChatController(_ params: NavigateToChatControllerParams)
     func openExternalUrl(context: AccountContext, urlContext: OpenURLContext, url: String, forceExternal: Bool, presentationData: PresentationData, navigationController: NavigationController?, dismissInput: @escaping () -> Void)
     func chatAvailableMessageActions(postbox: Postbox, accountPeerId: PeerId, messageIds: Set<MessageId>) -> Signal<ChatAvailableMessageActions, NoError>
@@ -579,6 +655,7 @@ public protocol AccountContext: class {
     
     var currentLimitsConfiguration: Atomic<LimitsConfiguration> { get }
     var currentContentSettings: Atomic<ContentSettings> { get }
+    var currentAppConfiguration: Atomic<AppConfiguration> { get }
     
     func storeSecureIdPassword(password: String)
     func getStoredSecureIdPassword() -> String?

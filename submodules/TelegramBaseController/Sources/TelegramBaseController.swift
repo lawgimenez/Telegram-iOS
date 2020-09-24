@@ -37,7 +37,7 @@ private func presentLiveLocationController(context: AccountContext, peerId: Peer
             }, addToTransitionSurface: { _ in
             }, openUrl: { _ in
             }, openPeer: { peer, navigation in
-            }, callPeer: { _ in
+            }, callPeer: { _, _ in
             }, enqueueMessage: { _ in
             }, sendSticker: nil,
             setupTemporaryHiddenMedia: { _, _, _ in
@@ -72,7 +72,7 @@ open class TelegramBaseController: ViewController, KeyShortcutResponder {
     public var tempVoicePlaylistEnded: (() -> Void)?
     public var tempVoicePlaylistItemChanged: ((SharedMediaPlaylistItem?, SharedMediaPlaylistItem?) -> Void)?
     
-    private var mediaAccessoryPanel: (MediaNavigationAccessoryPanel, MediaManagerPlayerType)?
+    public var mediaAccessoryPanel: (MediaNavigationAccessoryPanel, MediaManagerPlayerType)?
     
     private var locationBroadcastMode: LocationBroadcastNavigationAccessoryPanelMode?
     private var locationBroadcastPeers: [Peer]?
@@ -97,7 +97,7 @@ open class TelegramBaseController: ViewController, KeyShortcutResponder {
         return super.visualNavigationInsetHeight + self.additionalHeight
     }
     
-    private var additionalHeight: CGFloat {
+    public var additionalHeight: CGFloat {
         var height: CGFloat = 0.0
         if let _ = self.mediaAccessoryPanel {
             height += MediaNavigationAccessoryHeaderNode.minimizedHeight
@@ -503,7 +503,7 @@ open class TelegramBaseController: ViewController, KeyShortcutResponder {
                 }
                 
                 let mediaAccessoryPanel = MediaNavigationAccessoryPanel(context: self.context)
-                mediaAccessoryPanel.containerNode.headerNode.displayScrubber = type != .voice
+                mediaAccessoryPanel.containerNode.headerNode.displayScrubber = item.playbackData?.type != .instantVideo
                 mediaAccessoryPanel.close = { [weak self] in
                     if let strongSelf = self, let (_, _, _, _, type, _) = strongSelf.playlistStateAndType {
                         strongSelf.context.sharedContext.mediaManager.setPlaylist(nil, type: type, control: SharedMediaPlayerControlAction.playback(.pause))

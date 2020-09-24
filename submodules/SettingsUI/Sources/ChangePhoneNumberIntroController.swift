@@ -69,7 +69,7 @@ private final class ChangePhoneNumberIntroControllerNode: ASDisplayNode {
         let contentHeight: CGFloat = largeScreen ? 420.0 : 400.0
         
         let iconSize = self.iconNode.measure(CGSize(width: 400.0, height: 400.0))
-        let labelSize = self.labelNode.measure(CGSize(width: 295.0, height: CGFloat.greatestFiniteMagnitude))
+        let labelSize = self.labelNode.updateLayout(CGSize(width: 295.0, height: CGFloat.greatestFiniteMagnitude))
         let buttonSize = self.buttonNode.measure(CGSize(width: 295.0, height: CGFloat.greatestFiniteMagnitude))
         
         transition.updateFrame(node: self.iconNode, frame: CGRect(origin: CGPoint(x: floor((layout.size.width - iconSize.width) / 2.0), y: insets.top + floor((availableHeight - contentHeight) / 2.0) + floor(iconSize.height * (largeScreen ? CGFloat(0.2) : CGFloat(0.5)))), size: iconSize))
@@ -84,13 +84,13 @@ private final class ChangePhoneNumberIntroControllerNode: ASDisplayNode {
     }
 }
 
-final class ChangePhoneNumberIntroController: ViewController {
+public final class ChangePhoneNumberIntroController: ViewController {
     private let context: AccountContext
     private var didPlayPresentationAnimation = false
     
     private var presentationData: PresentationData
     
-    init(context: AccountContext, phoneNumber: String) {
+    public init(context: AccountContext, phoneNumber: String) {
         self.context = context
         
         self.presentationData = context.sharedContext.currentPresentationData.with { $0 }
@@ -110,7 +110,7 @@ final class ChangePhoneNumberIntroController: ViewController {
         fatalError("init(coder:) has not been implemented")
     }
     
-    override func loadDisplayNode() {
+    public override func loadDisplayNode() {
         self.displayNode = ChangePhoneNumberIntroControllerNode(presentationData: self.presentationData)
         (self.displayNode as! ChangePhoneNumberIntroControllerNode).dismiss = { [weak self] in
             self?.presentingViewController?.dismiss(animated: false, completion: nil)
@@ -121,7 +121,7 @@ final class ChangePhoneNumberIntroController: ViewController {
         self.displayNodeDidLoad()
     }
     
-    override func viewDidAppear(_ animated: Bool) {
+    public override func viewDidAppear(_ animated: Bool) {
         super.viewDidAppear(animated)
         
         /*if !self.didPlayPresentationAnimation {

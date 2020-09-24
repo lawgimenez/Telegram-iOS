@@ -312,6 +312,7 @@ public func customizeDefaultDayTheme(theme: PresentationTheme, editing: Bool, ti
         actionSheet: actionSheet,
         contextMenu: theme.contextMenu,
         inAppNotification: theme.inAppNotification,
+        chart: theme.chart,
         preview: theme.preview
     )
 }
@@ -360,7 +361,9 @@ public func makeDefaultDayPresentationTheme(extendingThemeReference: Presentatio
         segmentedBackgroundColor: UIColor(rgb: 0xe9e9e9),
         segmentedForegroundColor: UIColor(rgb: 0xf7f7f7),
         segmentedTextColor: UIColor(rgb: 0x000000),
-        segmentedDividerColor: UIColor(rgb: 0xd6d6dc)
+        segmentedDividerColor: UIColor(rgb: 0xd6d6dc),
+        clearButtonBackgroundColor: UIColor(rgb: 0xE3E3E3, alpha: 0.78),
+        clearButtonForegroundColor: UIColor(rgb: 0x7f7f7f)
     )
     
     let navigationSearchBar = PresentationThemeNavigationSearchBar(
@@ -615,7 +618,7 @@ public func makeDefaultDayPresentationTheme(extendingThemeReference: Presentatio
     )
     
     let serviceMessage = PresentationThemeServiceMessage(
-        components: PresentationThemeServiceMessageColor(withDefaultWallpaper: PresentationThemeServiceMessageColorComponents(fill: UIColor(rgb: 0x748391, alpha: 0.45), primaryText: UIColor(rgb: 0xffffff), linkHighlight: UIColor(rgb: 0x748391, alpha: 0.25), scam: UIColor(rgb: 0xffffff), dateFillStatic: UIColor(rgb: 0x748391, alpha: 0.45), dateFillFloating: UIColor(rgb: 0x939fab, alpha: 0.5)), withCustomWallpaper: PresentationThemeServiceMessageColorComponents(fill: serviceBackgroundColor, primaryText: UIColor(rgb: 0xffffff), linkHighlight: UIColor(rgb: 0x748391, alpha: 0.25), scam: UIColor(rgb: 0xffffff), dateFillStatic: serviceBackgroundColor, dateFillFloating: serviceBackgroundColor.withAlphaComponent(serviceBackgroundColor.alpha * 0.6667))),
+        components: PresentationThemeServiceMessageColor(withDefaultWallpaper: PresentationThemeServiceMessageColorComponents(fill: UIColor(rgb: 0x939fab, alpha: 0.5), primaryText: UIColor(rgb: 0xffffff), linkHighlight: UIColor(rgb: 0x748391, alpha: 0.25), scam: UIColor(rgb: 0xffffff), dateFillStatic: UIColor(rgb: 0x748391, alpha: 0.45), dateFillFloating: UIColor(rgb: 0x939fab, alpha: 0.5)), withCustomWallpaper: PresentationThemeServiceMessageColorComponents(fill: serviceBackgroundColor, primaryText: UIColor(rgb: 0xffffff), linkHighlight: UIColor(rgb: 0x748391, alpha: 0.25), scam: UIColor(rgb: 0xffffff), dateFillStatic: serviceBackgroundColor, dateFillFloating: serviceBackgroundColor.withAlphaComponent(serviceBackgroundColor.alpha * 0.6667))),
         unreadBarFillColor: UIColor(white: 1.0, alpha: 0.9),
         unreadBarStrokeColor: UIColor(white: 0.0, alpha: 0.2),
         unreadBarTextColor: UIColor(rgb: 0x86868d),
@@ -729,9 +732,14 @@ public func makeDefaultDayPresentationTheme(extendingThemeReference: Presentatio
         sectionSeparatorColor: UIColor(rgb: 0x8a8a8a, alpha: 0.2),
         itemBackgroundColor: UIColor(rgb: 0x000000, alpha: 0.0),
         itemHighlightedBackgroundColor: UIColor(rgb: 0x3c3c43, alpha: 0.2),
-        primaryColor: UIColor(rgb: 0x000000, alpha: 1.0),
+        primaryColor: UIColor(rgb: 0x000000),
         secondaryColor: UIColor(rgb: 0x000000, alpha: 0.8),
-        destructiveColor: UIColor(rgb: 0xff3b30)
+        destructiveColor: UIColor(rgb: 0xff3b30),
+        badgeFillColor: UIColor(rgb: 0x007ee5),
+        badgeForegroundColor: UIColor(rgb: 0xffffff),
+        badgeInactiveFillColor: UIColor(rgb: 0xb6b6bb),
+        badgeInactiveForegroundColor: UIColor(rgb: 0xffffff),
+        extractedContentTintColor: .white
     )
     
     let inAppNotification = PresentationThemeInAppNotification(
@@ -748,6 +756,18 @@ public func makeDefaultDayPresentationTheme(extendingThemeReference: Presentatio
         )
     )
     
+    let chart = PresentationThemeChart(
+        labelsColor: UIColor(rgb: 0x252529, alpha: 0.5),
+        helperLinesColor: UIColor(rgb: 0x182d3b, alpha: 0.3),
+        strongLinesColor: UIColor(rgb: 0x182d3b, alpha: 0.3),
+        barStrongLinesColor: UIColor(rgb: 0x252529, alpha: 0.2),
+        detailsTextColor: UIColor(rgb: 0x6d6d72),
+        detailsArrowColor: UIColor(rgb: 0xc5c7cd),
+        detailsViewColor: UIColor(rgb: 0xf5f5fb),
+        rangeViewFrameColor: UIColor(rgb: 0xcad4de),
+        rangeViewMarkerColor: UIColor(rgb: 0xffffff)
+    )
+    
     return PresentationTheme(
         name: extendingThemeReference?.name ?? .builtin(day ? .day : .dayClassic),
         index: extendingThemeReference?.index ?? PresentationThemeReference.builtin(day ? .day : .dayClassic).index,
@@ -762,6 +782,7 @@ public func makeDefaultDayPresentationTheme(extendingThemeReference: Presentatio
         actionSheet: actionSheet,
         contextMenu: contextMenu,
         inAppNotification: inAppNotification,
+        chart: chart,
         preview: preview
     )
 }

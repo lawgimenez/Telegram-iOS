@@ -8,6 +8,7 @@ import SyncCore
 import MediaResources
 import Tuples
 import ImageBlur
+import FastBlur
 
 private func imageFromAJpeg(data: Data) -> (UIImage, UIImage)? {
     if let (colorData, alphaData) = data.withUnsafeBytes({ bytes -> (Data, Data)? in
@@ -101,7 +102,7 @@ private func chatMessageStickerDatas(postbox: Postbox, file: TelegramMediaFile, 
 
 public func chatMessageAnimatedStickerDatas(postbox: Postbox, file: TelegramMediaFile, small: Bool, size: CGSize, fitzModifier: EmojiFitzModifier? = nil, fetched: Bool, onlyFullSize: Bool, synchronousLoad: Bool) -> Signal<Tuple3<Data?, Data?, Bool>, NoError> {
     let thumbnailResource = chatMessageStickerResource(file: file, small: true)
-    let resource = chatMessageStickerResource(file: file, small: small)
+    let resource = chatMessageStickerResource(file: file, small: false)
     
     let firstFrameRepresentation = CachedAnimatedStickerFirstFrameRepresentation(width: Int32(size.width), height: Int32(size.height), fitzModifier: fitzModifier)
     let maybeFetched = postbox.mediaBox.cachedResourceRepresentation(resource, representation: firstFrameRepresentation, complete: false, fetch: false, attemptSynchronously: synchronousLoad)
@@ -333,12 +334,18 @@ public func chatMessageSticker(account: Account, file: TelegramMediaFile, small:
     return chatMessageSticker(postbox: account.postbox, file: file, small: small, fetched: fetched, onlyFullSize: onlyFullSize, thumbnail: thumbnail, synchronousLoad: synchronousLoad)
 }
 
-public func chatMessageStickerPackThumbnail(postbox: Postbox, resource: MediaResource, animated: Bool = false, synchronousLoad: Bool = false) -> Signal<(TransformImageArguments) -> DrawingContext?, NoError> {
+public func chatMessageStickerPackThumbnail(postbox: Postbox, resource: MediaResource, animated: Bool = false, synchronousLoad: Bool = false, nilIfEmpty: Bool = false) -> Signal<(TransformImageArguments) -> DrawingContext?, NoError> {
     let signal = chatMessageStickerPackThumbnailData(postbox: postbox, resource: resource, animated: animated, synchronousLoad: synchronousLoad)
     
     return signal
     |> map { fullSizeData in
         return { arguments in
+            if nilIfEmpty {
+                if fullSizeData == nil {
+                    return nil
+                }
+            }
+            
             let context = DrawingContext(size: arguments.drawingSize, scale: arguments.scale ?? 0.0, clear: arguments.emptyColor == nil)
             
             let drawingRect = arguments.drawingRect
@@ -391,6 +398,10 @@ public func chatMessageSticker(postbox: Postbox, file: TelegramMediaFile, small:
         let fullSizeData = value._1
         let fullSizeComplete = value._2
         return { arguments in
+            if thumbnailData == nil && fullSizeData == nil {
+                return nil
+            }
+            
             let context = DrawingContext(size: arguments.drawingSize, scale: arguments.scale ?? 0.0, clear: arguments.emptyColor == nil)
             
             let drawingRect = arguments.drawingRect
@@ -482,6 +493,10 @@ public func chatMessageAnimatedSticker(postbox: Postbox, file: TelegramMediaFile
         let fullSizeData = value._1
         let fullSizeComplete = value._2
         return { arguments in
+            if thumbnailData == nil && fullSizeData == nil {
+                return nil
+            }
+            
             let context = DrawingContext(size: arguments.drawingSize, scale: arguments.scale ?? 0.0, clear: true)
             
             let drawingRect = arguments.drawingRect

@@ -224,6 +224,7 @@ public func customizeDefaultDarkPresentationTheme(theme: PresentationTheme, edit
         actionSheet: actionSheet,
         contextMenu: theme.contextMenu,
         inAppNotification: theme.inAppNotification,
+        chart: theme.chart,
         preview: theme.preview
     )
 }
@@ -256,7 +257,9 @@ public func makeDefaultDarkPresentationTheme(extendingThemeReference: Presentati
         segmentedBackgroundColor: UIColor(rgb: 0x3a3b3d),
         segmentedForegroundColor: UIColor(rgb: 0x6f7075),
         segmentedTextColor: UIColor(rgb: 0xffffff),
-        segmentedDividerColor: UIColor(rgb: 0x505155)
+        segmentedDividerColor: UIColor(rgb: 0x505155),
+        clearButtonBackgroundColor: UIColor(rgb: 0xffffff, alpha: 0.1),
+        clearButtonForegroundColor: UIColor(rgb: 0xffffff)
     )
 
     let navigationSearchBar = PresentationThemeNavigationSearchBar(
@@ -520,7 +523,12 @@ public func makeDefaultDarkPresentationTheme(extendingThemeReference: Presentati
         itemHighlightedBackgroundColor: UIColor(rgb: 0xffffff, alpha: 0.15),
         primaryColor: UIColor(rgb: 0xffffff, alpha: 1.0),
         secondaryColor: UIColor(rgb: 0xffffff, alpha: 0.8),
-        destructiveColor: UIColor(rgb: 0xeb5545)
+        destructiveColor: UIColor(rgb: 0xeb5545),
+        badgeFillColor: UIColor(rgb: 0xffffff),
+        badgeForegroundColor: UIColor(rgb: 0x000000),
+        badgeInactiveFillColor: UIColor(rgb: 0xffffff).withAlphaComponent(0.5),
+        badgeInactiveForegroundColor: UIColor(rgb: 0x000000),
+        extractedContentTintColor: UIColor(rgb: 0xffffff, alpha: 1.0)
     )
 
     let inAppNotification = PresentationThemeInAppNotification(
@@ -535,6 +543,17 @@ public func makeDefaultDarkPresentationTheme(extendingThemeReference: Presentati
                 separatorColor: UIColor(rgb: 0x000000)
             )
         )
+    )
+    let chart = PresentationThemeChart(
+        labelsColor: UIColor(rgb: 0x8e8e93),
+        helperLinesColor: UIColor(rgb: 0xd8d8d8, alpha: 0.35),
+        strongLinesColor: UIColor(rgb: 0xd8d8d8, alpha: 0.35),
+        barStrongLinesColor: UIColor(rgb: 0xd8d8d8, alpha: 0.45),
+        detailsTextColor: UIColor(rgb: 0xffffff),
+        detailsArrowColor: UIColor(rgb: 0xd8d8d8),
+        detailsViewColor: UIColor(rgb: 0x000000),
+        rangeViewFrameColor: UIColor(rgb: 0x6d6d72),
+        rangeViewMarkerColor: UIColor(rgb: 0xffffff)
     )
 
     return PresentationTheme(
@@ -551,6 +570,7 @@ public func makeDefaultDarkPresentationTheme(extendingThemeReference: Presentati
         actionSheet: actionSheet,
         contextMenu: contextMenu,
         inAppNotification: inAppNotification,
+        chart: chart,
         preview: preview
     )
 }
